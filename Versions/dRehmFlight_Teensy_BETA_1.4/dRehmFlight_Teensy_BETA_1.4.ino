@@ -2,7 +2,7 @@
 //Author: Nicholas Rehm
 //Project Start: 1/6/2020
 //Last Updated: 7/29/2022
-//Version: Beta 1.3
+//Version: Beta 1.4
  
 //========================================================================================================================//
 
@@ -35,16 +35,16 @@ Everyone that sends me pictures and videos of your flying creations! -Nick
 //========================================================================================================================//
 
 //Uncomment only one receiver type
-#define USE_PWM_RX
+//#define USE_PWM_RX
 //#define USE_PPM_RX
-//#define USE_SBUS_RX
+#define USE_SBUS_RX
 //#define USE_DSM_RX
 static const uint8_t num_DSM_channels = 6; //If using DSM RX, change this to match the number of transmitter channels you have
 
 //Uncomment only one IMU
-#define USE_MPU6050_I2C //Default
+//#define USE_MPU6050_I2C //Default
 //#define USE_MPU9250_SPI
-//#define USE_LSM6DSOX_SPI
+#define USE_LSM6DSOX_SPI
 
 //Uncomment only one full scale gyro range (deg/sec)
 #define GYRO_250DPS //Default
@@ -88,17 +88,26 @@ static const uint8_t num_DSM_channels = 6; //If using DSM RX, change this to mat
   #include <Adafruit_LSM6DSOX.h>
   Adafruit_LSM6DSOX lsm6dsox;
 
-  #define LSM_CS 36
-  #define LSM_SCK 37
-  #define LSM_MISO 34
-  #define LSM_MOSI 35
-
+  #define LSM_MISO 34  // MISO2/DO--red
+  #define LSM_MOSI 35  // MOSI2/SDA--black
+  #define LSM_CS 36     // CS2--green-yellow
+  #define LSM_SCK 37    // SCK2(SCL)--white
+  
   sensors_event_t accel;
   sensors_event_t gyro;
   sensors_event_t temp;  //unused, but could be interesting
 #else
   #error No MPU defined... 
 #endif
+
+// BJ - testing defined values
+#define DEG2RAD  0.0174533f
+#define RAD2DEG  57.29575496f
+#define G2MS     9.80665f
+#define MS2G     0.10197162129779283f
+
+
+
 
 
 
@@ -194,12 +203,13 @@ float MagScaleY = 1.0;
 float MagScaleZ = 1.0;
 
 //IMU calibration parameters - calibrate IMU using calculate_IMU_error() in the void setup() to get these values, then comment out calculate_IMU_error()
-float AccErrorX = 0.0;
-float AccErrorY = 0.0;
-float AccErrorZ = 0.0;
-float GyroErrorX = 0.0;
-float GyroErrorY= 0.0;
-float GyroErrorZ = 0.0;
+float AccErrorX = -0.01;
+float AccErrorY = 0.01;
+float AccErrorZ = 0.04;
+float GyroErrorX = 0.41;
+float GyroErrorY = 0.17;
+float GyroErrorZ = -0.67;
+
 
 //Controller parameters (take note of defaults before modifying!): 
 float i_limit = 25.0;     //Integrator saturation level, mostly for safety (default 25.0)
@@ -427,7 +437,7 @@ void loop() {
   //printAccelData();     //Prints filtered accelerometer data direct from IMU (expected: ~ -2 to 2; x,y 0 when level, z 1 when level)
   //printMagData();       //Prints filtered magnetometer data direct from IMU (expected: ~ -300 to 300)
   //printRollPitchYaw();  //Prints roll, pitch, and yaw angles in degrees from Madgwick filter (expected: degrees, 0 when level)
-  //printPIDoutput();     //Prints computed stabilized PID variables from controller and desired setpoint (expected: ~ -1 to 1)
+  printPIDoutput();     //Prints computed stabilized PID variables from controller and desired setpoint (expected: ~ -1 to 1)
   //printMotorCommands(); //Prints the values being written to the motors (expected: 120 to 250)
   //printServoCommands(); //Prints the values being written to the servos (expected: 0 to 180)
   //printLoopRate();      //Prints the time between loops in microseconds (expected: microseconds between loop iterations)
@@ -621,12 +631,16 @@ void getIMUdata() {
     mpu9250.getMotion9(&AcX, &AcY, &AcZ, &GyX, &GyY, &GyZ, &MgX, &MgY, &MgZ);
   #elif defined USE_LSM6DSOX_SPI
     lsm6dsox.getEvent(&accel, &gyro, &temp);
-    AccX = accel.acceleration.x / 9.80665;  // Convert m/s to G-factor
-    AccY = accel.acceleration.y / 9.80665;
-    AccZ = accel.acceleration.z / 9.80665;
-    GyroX = gyro.gyro.x * 57.29578;  // convert rad/s back to deg/sec
-    GyroY = gyro.gyro.y * 57.29578;
-    GyroZ = gyro.gyro.z * 57.29578;
+
+    // THe LSM6DSOX has the X and Y reversed from the MPU6050 as well has having the X/Y accelerometers reversed and Y gyro reversed    
+    AccX = accel.acceleration.y * MS2G;  // Convert m/s to G-factor
+    AccY = accel.acceleration.x * -MS2G;
+    AccZ = accel.acceleration.z * MS2G;
+    GyroX = gyro.gyro.y * RAD2DEG;  // convert rad/s back to deg/sec
+    GyroY = gyro.gyro.x * -RAD2DEG;
+    GyroZ = gyro.gyro.z * RAD2DEG;
+
+
   #endif
 
   // The MPU6050 and MPU9250 IMUs have a different scale factor from the LSM6DSOX 
@@ -715,12 +729,15 @@ void calculate_IMU_error() {
       mpu9250.getMotion9(&AcX, &AcY, &AcZ, &GyX, &GyY, &GyZ, &MgX, &MgY, &MgZ);
     #elif defined USE_LSM6DSOX_SPI
       lsm6dsox.getEvent(&accel, &gyro, &temp);
-      AccX = accel.acceleration.x / 9.80665;  // Convert m/s to G-factor
-      AccY = accel.acceleration.y / 9.80665;
-      AccZ = accel.acceleration.z / 9.80665;
-      GyroX = gyro.gyro.x * 57.29578;  // convert rad/s back to deg/sec
-      GyroY = gyro.gyro.y * 57.29578;
-      GyroZ = gyro.gyro.z * 57.29578; 
+
+      // THe LSM6DSOX has the X and Y reversed from the MPU6050 as well has having the X/Y accelerometers reversed and Y gyro reversed    
+      AccX = accel.acceleration.y *  MS2G;  // Convert m/s to G-factor
+      AccY = accel.acceleration.x * -MS2G;
+      AccZ = accel.acceleration.z *  MS2G;
+      GyroX = gyro.gyro.y *  RAD2DEG;  // convert rad/s back to deg/sec
+      GyroY = gyro.gyro.x * -RAD2DEG;
+      GyroZ = gyro.gyro.z *  RAD2DEG;
+
     #endif
 
     // The MPU6050 and MPU9250 IMUs have a different scale factor from the LSM6DSOX
@@ -823,9 +840,9 @@ void Madgwick(float gx, float gy, float gz, float ax, float ay, float az, float 
   }
 
   //Convert gyroscope degrees/sec to radians/sec
-  gx *= 0.0174533f;
-  gy *= 0.0174533f;
-  gz *= 0.0174533f;
+  gx *= DEG2RAD;
+  gy *= DEG2RAD;
+  gz *= DEG2RAD;
 
   //Rate of change of quaternion from gyroscope
   qDot1 = 0.5f * (-q1 * gx - q2 * gy - q3 * gz);
@@ -927,9 +944,9 @@ void Madgwick6DOF(float gx, float gy, float gz, float ax, float ay, float az, fl
   float _2q0, _2q1, _2q2, _2q3, _4q0, _4q1, _4q2 ,_8q1, _8q2, q0q0, q1q1, q2q2, q3q3;
 
   //Convert gyroscope degrees/sec to radians/sec
-  gx *= 0.0174533f;
-  gy *= 0.0174533f;
-  gz *= 0.0174533f;
+  gx *= DEG2RAD;
+  gy *= DEG2RAD;
+  gz *= DEG2RAD;
 
   //Rate of change of quaternion from gyroscope
   qDot1 = 0.5f * (-q1 * gx - q2 * gy - q3 * gz);
@@ -1349,7 +1366,7 @@ void failSafe() {
   //If any failures, set to default failsafe values
   #ifdef USE_SBUS_RX
   if (sbusFailSafe) {
-  #elif
+  #else
   if ((check1 + check2 + check3 + check4 + check5 + check6) > 0) {
   #endif
     channel_1_pwm = channel_1_fs;
@@ -1773,8 +1790,8 @@ void printRollPitchYaw() {
 void printPIDoutput() {
   if (current_time - print_counter > 10000) {
     print_counter = micros();
-    Serial.print(F("LOW:-2.0"));
-    Serial.print(F(" HIGH:2.0"));
+    Serial.print(F("LOW:-1.0"));
+    Serial.print(F(" HIGH:1.0"));
     Serial.print(F(" roll_PID:"));
     Serial.print(roll_PID);
     Serial.print(F(" pitch_PID:"));
