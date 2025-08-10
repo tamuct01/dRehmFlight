@@ -1,15 +1,16 @@
 
 
-// IMU_PID.cpp
+// IMU_Wrapper.cpp
+// This is a wrapper for IMU chips supported by dRehmFlight.  It consolidates all the IMU handling and PID subrutines into a single library that most people won't need to mess with.
 
 
 
-#include "IMU_PID.h"
+#include "IMU_Wrapper.h"
 
 
-IMU::IMU(IMUType type): IMU(type, GYRO_250DPS, ACCEL_2G) {};
+IMU_Wrapper::IMU_Wrapper(IMUType type): IMU_Wrapper(type, GYRO_250DPS, ACCEL_2G) {};
 
-IMU::IMU(IMUType type, Gyro_DPS gyroDPS, Accel_G accelG) {
+IMU_Wrapper::IMU_Wrapper(IMUType type, Gyro_DPS gyroDPS, Accel_G accelG) {
     _mpu6050 = nullptr;
     _mpu9250 = nullptr;
     _lsm6dsox = nullptr;
@@ -23,15 +24,12 @@ IMU::IMU(IMUType type, Gyro_DPS gyroDPS, Accel_G accelG) {
       case GYRO_250DPS:
         _gyro_scale_factor = 131.0;
         break;
-      
       case GYRO_500DPS:
         _gyro_scale_factor = 65.5;
         break;
-
       case GYRO_1000DPS:
         _gyro_scale_factor = 32.8;
         break;
-
       case GYRO_2000DPS:
         _gyro_scale_factor = 16.4;
         break;
@@ -41,15 +39,12 @@ IMU::IMU(IMUType type, Gyro_DPS gyroDPS, Accel_G accelG) {
       case ACCEL_2G:
         _accel_scale_factor = 16384.0;
         break;
-
       case ACCEL_4G:
         _accel_scale_factor = 8192.0;
         break;
-
       case ACCEL_8G:
         _accel_scale_factor = 4096.0;
         break;
-
       case ACCEL_16G:
         _accel_scale_factor = 2048.0;
         break;
@@ -66,7 +61,7 @@ IMU::IMU(IMUType type, Gyro_DPS gyroDPS, Accel_G accelG) {
 
   
 
-bool IMU::begin() {
+bool IMU_Wrapper::begin() {
   switch (_type) {
     case MPU6050_I2C:
     {
@@ -168,9 +163,9 @@ bool IMU::begin() {
             break;
         }
 
-        _mpu9250->setMagCalX(MagErrorX, MagScaleX);
-        _mpu9250->setMagCalY(MagErrorY, MagScaleY);
-        _mpu9250->setMagCalZ(MagErrorZ, MagScaleZ);
+        _mpu9250->setMagCalX(_MagErrorX, _MagScaleX);
+        _mpu9250->setMagCalY(_MagErrorY, _MagScaleY);
+        _mpu9250->setMagCalZ(_MagErrorZ, _MagScaleZ);
         _mpu9250->setSrd(0); //sets gyro and accel read to 1khz, magnetometer read to 100hz
         return true;
     }
@@ -178,19 +173,7 @@ bool IMU::begin() {
     case LSM6DSOX_SPI:
     {
       _lsm6dsox = new Adafruit_LSM6DSOX();
-
-      #define LSM_MISO 12  // MISO2/DO--red
-	    #define LSM_MOSI 11  // MOSI2/SDA--black
-      #define LSM_CS   10     // CS2--green-yellow
-      #define LSM_SCK  13    // SCK2/SCL--white
-
-      // #define LSM_MISO 34  // MISO2/DO--red
-	    // #define LSM_MOSI 35  // MOSI2/SDA--black
-      // #define LSM_CS 36     // CS2--green-yellow
-      // #define LSM_SCK 37    // SCK2(SCL)--white
-
-
-      if (!_lsm6dsox->begin_SPI(LSM_CS, LSM_SCK, LSM_MISO, LSM_MOSI)) {
+      if (!_lsm6dsox->begin_SPI(_cs_pin, _sck_pin, _miso_pin, _mosi_pin)) {
         Serial.println("Failed to find LSM6DSOX chip");
         Serial.println("LSM6DSOX initialization unsuccessful");
         Serial.println("Check LSM6DSOX wiring or try cycling power");
@@ -241,9 +224,19 @@ bool IMU::begin() {
 }
 
 
+// Sets the Class SPI Pins
+void IMU_Wrapper::setSPIpins(int8_t cs_pin, int8_t sck_pin, int8_t miso_pin, int8_t mosi_pin) {
+  _cs_pin = cs_pin;
+	_sck_pin = sck_pin;
+	_miso_pin = miso_pin;
+	_mosi_pin = mosi_pin;
+}
 
 
-void IMU::getIMUdata() {
+
+
+
+void IMU_Wrapper::getIMUdata() {
   //DESCRIPTION: Request full dataset from IMU and LP filter gyro, accelerometer, and magnetometer data
   /*
    * Reads accelerometer, gyro, and magnetometer data from IMU as AccX, AccY, AccZ, GyroX, GyroY, GyroZ, MagX, MagY, MagZ. 
@@ -252,6 +245,22 @@ void IMU::getIMUdata() {
    * off everything past 80Hz, but if your loop rate is not fast enough, the low pass filter will cause a lag in
    * the readings. The filter parameters B_gyro and B_accel are set to be good for a 2kHz loop rate. Finally,
    * the constant errors found in calculate_IMU_error() on startup are subtracted from the accelerometer and gyro readings.
+   * 
+   * Notes from BrianJones:
+   * IN STANDARD MOUNTING FORM:
+   * MPU6060
+   * Gyro
+   *    Roll RIGHT shows + X activity
+   *    Pitch FORWARD shows + Y activity
+   *    Yaw LEFT shows + Z activity
+   * Accel
+   *    Roll RIGHT shows +1 G on Y
+   *    Pitch BACKWARD shows +1G on X
+   *    +Z is normal gravity
+   * 
+   * The LSMDSOX has the X and Y axis swapped, and the Y axis inverted.  This is handled below to make it work like the original MPU6050 code from Nick
+   * I don't have a MPU9250 to test with.  I've kept Nick's code unchanged. 
+   * 
    */
   
   int16_t AcX = 0;
@@ -303,11 +312,10 @@ void IMU::getIMUdata() {
     MagZ = MgZ/6.0;
   }
 
-
   //Correct the outputs with the calculated error values
-  AccX = AccX - AccErrorX;
-  AccY = AccY - AccErrorY;
-  AccZ = AccZ - AccErrorZ;
+  AccX = AccX - _AccErrorX;
+  AccY = AccY - _AccErrorY;
+  AccZ = AccZ - _AccErrorZ;
   //LP filter accelerometer data
   AccX = (1.0 - B_accel)*AccX_prev + B_accel*AccX;
   AccY = (1.0 - B_accel)*AccY_prev + B_accel*AccY;
@@ -317,9 +325,9 @@ void IMU::getIMUdata() {
   AccZ_prev = AccZ;
 
   //Correct the outputs with the calculated error values
-  GyroX = GyroX - GyroErrorX;
-  GyroY = GyroY - GyroErrorY;
-  GyroZ = GyroZ - GyroErrorZ;
+  GyroX = GyroX - _GyroErrorX;
+  GyroY = GyroY - _GyroErrorY;
+  GyroZ = GyroZ - _GyroErrorZ;
   //LP filter gyro data
   GyroX = (1.0 - B_gyro)*GyroX_prev + B_gyro*GyroX;
   GyroY = (1.0 - B_gyro)*GyroY_prev + B_gyro*GyroY;
@@ -329,9 +337,9 @@ void IMU::getIMUdata() {
   GyroZ_prev = GyroZ;
 
   //Correct the outputs with the calculated error values
-  MagX = (MagX - MagErrorX)*MagScaleX;
-  MagY = (MagY - MagErrorY)*MagScaleY;
-  MagZ = (MagZ - MagErrorZ)*MagScaleZ;
+  MagX = (MagX - _MagErrorX)*_MagScaleX;
+  MagY = (MagY - _MagErrorY)*_MagScaleY;
+  MagZ = (MagZ - _MagErrorZ)*_MagScaleZ;
   //LP filter magnetometer data
   MagX = (1.0 - B_mag)*MagX_prev + B_mag*MagX;
   MagY = (1.0 - B_mag)*MagY_prev + B_mag*MagY;
@@ -344,51 +352,60 @@ void IMU::getIMUdata() {
 
 
 
-void IMU::calculate_IMU_error() {
+void IMU_Wrapper::calculate_IMU_error() {
   //DESCRIPTION: Computes IMU accelerometer and gyro error on startup. Note: vehicle should be powered up on flat surface
   /*
    * Don't worry too much about what this is doing. The error values it computes are applied to the raw gyro and 
    * accelerometer values AccX, AccY, AccZ, GyroX, GyroY, GyroZ in getIMUdata(). This eliminates drift in the
    * measurement. 
    */
-  #ifndef USE_LSM6DSOX_SPI
-    int16_t AcX = 0;
-    int16_t AcY = 0;
-    int16_t AcZ = 0;
-    int16_t GyX = 0;
-    int16_t GyY = 0;
-    int16_t GyZ = 0;
-  #endif
-  AccErrorX = 0.0;
-  AccErrorY = 0.0;
-  AccErrorZ = 0.0;
-  GyroErrorX = 0.0;
-  GyroErrorY= 0.0;
-  GyroErrorZ = 0.0;
+  int16_t AcX = 0;
+  int16_t AcY = 0;
+  int16_t AcZ = 0;
+  int16_t GyX = 0;
+  int16_t GyY = 0;
+  int16_t GyZ = 0;
+  int16_t MgX = 0;
+  int16_t MgY = 0;
+  int16_t MgZ = 0;
+  
+  _AccErrorX = 0.0;
+  _AccErrorY = 0.0;
+  _AccErrorZ = 0.0;
+  _GyroErrorX = 0.0;
+  _GyroErrorY= 0.0;
+  _GyroErrorZ = 0.0;
+
+  Serial.println("Beginning gyro/accel calibration...");
+  delay(5000);    // Some IMUs (like the LSM6DSOX) take a bit to settle.  I get way different readings for about the first 5-10s of power on.
   
   //Read IMU values 12000 times
   int c = 0;
   while (c < 12000) {
-    #if defined USE_MPU6050_I2C
-      mpu6050.getMotion6(&AcX, &AcY, &AcZ, &GyX, &GyY, &GyZ);
-    #elif defined USE_MPU9250_SPI
-      mpu9250.getMotion9(&AcX, &AcY, &AcZ, &GyX, &GyY, &GyZ, &MgX, &MgY, &MgZ);
-    #elif defined USE_LSM6DSOX_SPI
-      lsm6dsox.getEvent(&accel, &gyro, &temp);
+    if (_type == MPU6050_I2C) {
+      _mpu6050->getMotion6(&AcX, &AcY, &AcZ, &GyX, &GyY, &GyZ);
+    }
+    else if (_type == MPU9250_SPI) {
+      _mpu9250->getMotion9(&AcX, &AcY, &AcZ, &GyX, &GyY, &GyZ, &MgX, &MgY, &MgZ);
+    }
+    else if (_type == LSM6DSOX_SPI) {
+      _lsm6dsox->getEvent(&accel, &gyro, &temp);
 
-      // THe LSM6DSOX has the X and Y reversed from the MPU6050 as well has having the X/Y accelerometers reversed and Y gyro reversed    
-      AccX = accel.acceleration.y *  MS2G;  // Convert m/s to G-factor
+      // THe LSM6DSOX has the X and Y reversed from the MPU6050 as well has having Y gyro flipped
+      AccX = accel.acceleration.y * MS2G;  // Convert m/s to G-factor
       AccY = accel.acceleration.x * -MS2G;
-      AccZ = accel.acceleration.z *  MS2G;
-      GyroX = gyro.gyro.y *  RAD2DEG;  // convert rad/s back to deg/sec
+      AccZ = accel.acceleration.z * MS2G;
+      GyroX = gyro.gyro.y * RAD2DEG;  // convert rad/s back to deg/sec
       GyroY = gyro.gyro.x * -RAD2DEG;
-      GyroZ = gyro.gyro.z *  RAD2DEG;
-
-    #endif
-
-    // The MPU6050 and MPU9250 IMUs have a different scale factor from the LSM6DSOX
-    #ifndef USE_LSM6DSOX_SPI
-    //Accelerometer
+      GyroZ = gyro.gyro.z * RAD2DEG;
+    }
+    else {
+      // should throw an error probably
+    }
+    
+    // The MPU6050 and MPU9250 IMUs have a different scale factor from the LSM6DSOX 
+    if (_type == MPU6050_I2C || _type == MPU9250_SPI) {
+      //Accelerometer
       AccX = AcX / _accel_scale_factor; //G's
       AccY = AcY / _accel_scale_factor;
       AccZ = AcZ / _accel_scale_factor;
@@ -397,53 +414,50 @@ void IMU::calculate_IMU_error() {
       GyroX = GyX / _gyro_scale_factor; //deg/sec
       GyroY = GyY / _gyro_scale_factor;
       GyroZ = GyZ / _gyro_scale_factor;
-    #endif
+    }
 
     //Sum all readings
-    AccErrorX  = AccErrorX + AccX;
-    AccErrorY  = AccErrorY + AccY;
-    AccErrorZ  = AccErrorZ + AccZ;
-    GyroErrorX = GyroErrorX + GyroX;
-    GyroErrorY = GyroErrorY + GyroY;
-    GyroErrorZ = GyroErrorZ + GyroZ;
+    _AccErrorX  = _AccErrorX + AccX;
+    _AccErrorY  = _AccErrorY + AccY;
+    _AccErrorZ  = _AccErrorZ + AccZ;
+    _GyroErrorX = _GyroErrorX + GyroX;
+    _GyroErrorY = _GyroErrorY + GyroY;
+    _GyroErrorZ = _GyroErrorZ + GyroZ;
     c++;
   }
+
   //Divide the sum by 12000 to get the error value
-  AccErrorX  = AccErrorX / c;
-  AccErrorY  = AccErrorY / c;
-  AccErrorZ  = AccErrorZ / c - 1.0;
-  GyroErrorX = GyroErrorX / c;
-  GyroErrorY = GyroErrorY / c;
-  GyroErrorZ = GyroErrorZ / c;
+  _AccErrorX  = _AccErrorX / c;
+  _AccErrorY  = _AccErrorY / c;
+  _AccErrorZ  = _AccErrorZ / c - 1.0;
+  _GyroErrorX = _GyroErrorX / c;
+  _GyroErrorY = _GyroErrorY / c;
+  _GyroErrorZ = _GyroErrorZ / c;
 
-  Serial.print("float AccErrorX = ");
-  Serial.print(AccErrorX);
-  Serial.println(";");
-  Serial.print("float AccErrorY = ");
-  Serial.print(AccErrorY);
-  Serial.println(";");
-  Serial.print("float AccErrorZ = ");
-  Serial.print(AccErrorZ);
-  Serial.println(";");
-  
-  Serial.print("float GyroErrorX = ");
-  Serial.print(GyroErrorX);
-  Serial.println(";");
-  Serial.print("float GyroErrorY = ");
-  Serial.print(GyroErrorY);
-  Serial.println(";");
-  Serial.print("float GyroErrorZ = ");
-  Serial.print(GyroErrorZ);
-  Serial.println(";");
+  Serial.println("Paste these lines in void setup() and comment out imu.calculate_IMU_error().");
+  Serial.print("imu.setAccError(");
+  Serial.print(_AccErrorX);
+  Serial.print(", ");
+  Serial.print(_AccErrorY);
+  Serial.print(", ");
+  Serial.print(_AccErrorZ);
+  Serial.println(");");
 
-  Serial.println("Paste these values in user specified variables section and comment out calculate_IMU_error() in void setup.");
+  Serial.print("imu.setGyroError(");
+  Serial.print(_GyroErrorX);
+  Serial.print(", ");
+  Serial.print(_GyroErrorY);
+  Serial.print(", ");
+  Serial.print(_GyroErrorZ);
+  Serial.println(");");
+
   while(1);
 }
 
 
 
-void IMU::calibrateMagnetometer() {
-  #if defined USE_MPU9250_SPI 
+void IMU_Wrapper::calibrateMagnetometer() {
+  if (_type == MPU9250_SPI) {
     float success;
     Serial.println("Beginning magnetometer calibration in");
     Serial.println("3...");
@@ -454,45 +468,42 @@ void IMU::calibrateMagnetometer() {
     delay(1000);
     Serial.println("Rotate the IMU about all axes until complete.");
     Serial.println(" ");
-    success = mpu9250.calibrateMag();
+    success = _mpu9250->calibrateMag();
     if(success) {
       Serial.println("Calibration Successful!");
-      Serial.println("Please comment out the calibrateMagnetometer() function and copy these values into the code:");
-      Serial.print("float MagErrorX = ");
-      Serial.print(mpu9250.getMagBiasX_uT());
-      Serial.println(";");
-      Serial.print("float MagErrorY = ");
-      Serial.print(mpu9250.getMagBiasY_uT());
-      Serial.println(";");
-      Serial.print("float MagErrorZ = ");
-      Serial.print(mpu9250.getMagBiasZ_uT());
-      Serial.println(";");
-      Serial.print("float MagScaleX = ");
-      Serial.print(mpu9250.getMagScaleFactorX());
-      Serial.println(";");
-      Serial.print("float MagScaleY = ");
-      Serial.print(mpu9250.getMagScaleFactorY());
-      Serial.println(";");
-      Serial.print("float MagScaleZ = ");
-      Serial.print(mpu9250.getMagScaleFactorZ());
-      Serial.println(";");
+      Serial.println("Please comment out the calibrateMagnetometer() function and copy these lines into the code:");
+      Serial.print("myIMU.setMagError(");
+      Serial.print(_mpu9250->getMagBiasX_uT());
+      Serial.print(", ");
+      Serial.print(_mpu9250->getMagBiasY_uT());
+      Serial.print(", ");
+      Serial.print(_mpu9250->getMagBiasZ_uT());
+      Serial.println(");");
+      Serial.print("myIMU.setMagScale(");
+      Serial.print(_mpu9250->getMagScaleFactorX());
+      Serial.print(", ");
+      Serial.print(_mpu9250->getMagScaleFactorY());
+      Serial.print(", ");
+      Serial.print(_mpu9250->getMagScaleFactorZ());
+      Serial.println(");");
       Serial.println(" ");
       Serial.println("If you are having trouble with your attitude estimate at a new flying location, repeat this process as needed.");
     }
     else {
       Serial.println("Calibration Unsuccessful. Please reset the board and try again.");
+      while(1); //Halt code so it won't enter main loop until this function commented out
     }
-  
+  }
+  else {
+    Serial.println("Error: MPU9250 not selected. Cannot calibrate non-existent magnetometer.");
     while(1); //Halt code so it won't enter main loop until this function commented out
-  #endif
-  Serial.println("Error: MPU9250 not selected. Cannot calibrate non-existent magnetometer.");
-  while(1); //Halt code so it won't enter main loop until this function commented out
+  }
 }
 
 
 
 
-void IMU::Madgwick(float invSampleFreq) {
+void IMU_Wrapper::Madgwick(float invSampleFreq) {
 
 	float gx = GyroX;
 	float gy = -GyroY;
@@ -624,7 +635,7 @@ void IMU::Madgwick(float invSampleFreq) {
   yaw_IMU   = -atan2(q1*q2 + q0*q3, 0.5f - q2*q2 - q3*q3)                  *57.29577951; //degrees
 }
 
-void IMU::Madgwick6DOF(float gx, float gy, float gz, float ax, float ay, float az, float invSampleFreq) {
+void IMU_Wrapper::Madgwick6DOF(float gx, float gy, float gz, float ax, float ay, float az, float invSampleFreq) {
   //DESCRIPTION: Attitude estimation through sensor fusion - 6DOF
   /*
    * See description of Madgwick() for more information. This is a 6DOF implimentation for when magnetometer data is not
@@ -710,7 +721,7 @@ void IMU::Madgwick6DOF(float gx, float gy, float gz, float ax, float ay, float a
 
 
 
-void IMU::controlANGLE(float roll_des, float pitch_des, float yaw_des, float dt, unsigned long throttle) {
+void IMU_Wrapper::controlANGLE(float roll_des, float pitch_des, float yaw_des, float dt, unsigned long throttle) {
   //DESCRIPTION: Computes control commands based on state error (angle)
   /*
    * Basic PID control to stablize on angle setpoint based on desired states roll_des, pitch_des, and yaw_des computed in 
@@ -762,7 +773,7 @@ void IMU::controlANGLE(float roll_des, float pitch_des, float yaw_des, float dt,
   integral_yaw_prev = integral_yaw;
 }
 
-void IMU::controlANGLE2(float roll_des, float pitch_des, float yaw_des, float dt, unsigned long throttle) {
+void IMU_Wrapper::controlANGLE2(float roll_des, float pitch_des, float yaw_des, float dt, unsigned long throttle) {
   //DESCRIPTION: Computes control commands based on state error (angle) in cascaded scheme
   /*
    * Gives better performance than controlANGLE() but requires much more tuning. Not reccommended for first-time setup.
@@ -848,7 +859,7 @@ void IMU::controlANGLE2(float roll_des, float pitch_des, float yaw_des, float dt
 
 }
 
-void IMU::controlRATE(float roll_des, float pitch_des, float yaw_des, float dt, unsigned long throttle) {
+void IMU_Wrapper::controlRATE(float roll_des, float pitch_des, float yaw_des, float dt, unsigned long throttle) {
   //DESCRIPTION: Computes control commands based on state error (rate)
   /*
    * See explanation for controlANGLE(). Everything is the same here except the error is now the desired rate - raw gyro reading.
@@ -898,7 +909,7 @@ void IMU::controlRATE(float roll_des, float pitch_des, float yaw_des, float dt, 
 
 
 
-float IMU::getGyro(char dir) {
+float IMU_Wrapper::getGyro(char dir) {
 	if (dir == 'X') {
 		return GyroX;
 	}
@@ -911,7 +922,7 @@ float IMU::getGyro(char dir) {
   return 0.0;
 }
 
-float IMU::getAccel(char dir) {
+float IMU_Wrapper::getAccel(char dir) {
 	if (dir == 'X') {
 		return AccX;
 	}
@@ -925,7 +936,7 @@ float IMU::getAccel(char dir) {
 }
 
 
-float IMU::getMag(char dir) {
+float IMU_Wrapper::getMag(char dir) {
 	if (dir == 'X') {
 		return MagX;
 	}
@@ -939,48 +950,61 @@ float IMU::getMag(char dir) {
 }
 
 
-	void IMU::setMagError() {
-    
-  }
-	void IMU::setMagScale() {
+	
+  void IMU_Wrapper::setAccError(float AccErrorX, float AccErrorY, float AccErrorZ) {
+    _AccErrorX = AccErrorX;
+	  _AccErrorY = AccErrorY;
+	  _AccErrorZ = AccErrorZ;
+	}
 
-
-  }
-	void IMU::setAccError() {
-
-
-  }
-	void IMU::setGryoError() {
-
-
+  void IMU_Wrapper::setGyroError(float GyroErrorX, float GyroErrorY, float GyroErrorZ) {
+    _GyroErrorX = GyroErrorX;
+	  _GyroErrorY = GyroErrorY;
+	  _GyroErrorZ = GyroErrorZ;
   }
 
+  void IMU_Wrapper::setMagError(float MagErrorX, float MagErrorY, float MagErrorZ) {
+    _MagErrorX = MagErrorX;
+	  _MagErrorY = MagErrorY;
+	  _MagErrorZ = MagErrorZ;
+	}
+
+  void IMU_Wrapper::setMagScale(float MagScaleX, float MagScaleY, float MagScaleZ) {
+    _MagScaleX = MagScaleX;
+	  _MagScaleY = MagScaleY;
+	  _MagScaleZ = MagScaleZ;
+  }
 
 
 
-  void IMU::setRollAnglePID(float Kp, float Ki, float Kd) {
+
+
+
+
+
+  void IMU_Wrapper::setRollAnglePID(float Kp, float Ki, float Kd) {
     Kp_roll_angle = Kp;
     Ki_roll_angle = Ki;
     Kd_roll_angle = Kd;
   }
-	void IMU::setPitchAnglePID(float Kp, float Ki, float Kd) {
+	void IMU_Wrapper::setPitchAnglePID(float Kp, float Ki, float Kd) {
     Kp_pitch_angle = Kp;
     Ki_pitch_angle = Ki;
     Kd_pitch_angle = Kd;
   }
 	
-	void IMU::setRollRatePID(float Kp, float Ki, float Kd) {
+	void IMU_Wrapper::setRollRatePID(float Kp, float Ki, float Kd) {
     Kp_roll_rate = Kp;
     Ki_roll_rate = Ki;
     Kd_roll_rate = Kd;
   }
 
-	void IMU::setPitchRatePID(float Kp, float Ki, float Kd) {
+	void IMU_Wrapper::setPitchRatePID(float Kp, float Ki, float Kd) {
     Kp_pitch_rate = Kp;
     Ki_pitch_rate = Ki;
     Kd_pitch_rate = Kd;
   }
-	void IMU::setYawRatePID(float Kp, float Ki, float Kd) {
+	void IMU_Wrapper::setYawRatePID(float Kp, float Ki, float Kd) {
     Kp_yaw = Kp;
     Ki_yaw = Ki;
     Kd_yaw = Kd;
@@ -992,7 +1016,7 @@ float IMU::getMag(char dir) {
 
   //HELPER FUNCTIONS
 
-float IMU::invSqrt(float x) {
+float IMU_Wrapper::invSqrt(float x) {
   //Fast inverse sqrt for madgwick filter
   /*
   float halfx = 0.5f * x;

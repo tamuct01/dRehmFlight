@@ -1,10 +1,12 @@
 
 
 
-// IMU_PID.h
+// IMU_Wrapper.h
+// This is a wrapper for IMU chips supported by dRehmFlight.  It consolidates all the IMU handling and PID subrutines into a single library that most people won't need to mess with.
 
-#ifndef IMU_PID_h
-#define IMU_PID_h
+
+#ifndef IMU_Wrapper_h
+#define IMU_Wrapper_h
 
 #include <Arduino.h>
 #include <Wire.h>     //I2c communication
@@ -46,14 +48,17 @@ enum Accel_G {
 
 
 
-class IMU {
+class IMU_Wrapper {
 public:
 	
-	IMU(IMUType type);
-	IMU(IMUType type, Gyro_DPS GyroDPS, Accel_G AccelG);
+	IMU_Wrapper(IMUType type);
+	IMU_Wrapper(IMUType type, Gyro_DPS GyroDPS, Accel_G AccelG);
 	bool begin();
 
+	void setSPIpins(int8_t cs_pin, int8_t sck_pin, int8_t miso_pin, int8_t mosi_pin);
+
 	void getIMUdata();
+
 	void calculate_IMU_error();
 	void calibrateMagnetometer();
 
@@ -64,10 +69,11 @@ public:
 	void Madgwick(float invSampleFreq);
 	void Madgwick6DOF(float gx, float gy, float gz, float ax, float ay, float az, float invSampleFreq);
 
-	void setMagError();
-	void setMagScale();
-	void setAccError();
-	void setGryoError();
+	void setAccError(float AccErrorX, float AccErrorY, float AccErrorZ);
+	void setGyroError(float GyroErrorX, float GyroErrorY, float GyroErrorZ);
+
+	void setMagError(float MagErrorX, float MagErrorY, float MagErrorZ);
+	void setMagScale(float MagScaleX, float MagScaleY, float MagScaleZ);
 
 	void setRollAnglePID(float Kp, float Ki, float Kd);
 	void setPitchAnglePID(float Kp, float Ki, float Kd);
@@ -112,6 +118,16 @@ private:
     sensors_event_t temp;  //unused, but could be interesting
 
 	
+	// for SPI pins definitions.  These are used by MPU9250 and LSMDSOX right now.  Defaults are the back pins (SPI2) on the Teensy 4.0
+	int8_t _cs_pin   = 36;
+	int8_t _sck_pin  = 37;
+	int8_t _miso_pin = 34;
+	int8_t _mosi_pin = 35;
+	
+
+
+
+
 	float invSqrt(float x);
 
 	float AccX_prev, AccY_prev, AccZ_prev;
@@ -136,21 +152,23 @@ private:
 	float B_gyro = 0.1;       //Gyro LP filter paramter, (MPU6050 default: 0.1. MPU9250 default: 0.17)
 	float B_mag = 1.0;        //Magnetometer LP filter parameter
 
-	//Magnetometer calibration parameters - if using MPU9250, uncomment calibrateMagnetometer() in void setup() to get these values, else just ignore these
-	float MagErrorX = 0.0;
-	float MagErrorY = 0.0; 
-	float MagErrorZ = 0.0;
-	float MagScaleX = 1.0;
-	float MagScaleY = 1.0;
-	float MagScaleZ = 1.0;
-
 	//IMU calibration parameters - calibrate IMU using calculate_IMU_error() in the void setup() to get these values, then comment out calculate_IMU_error()
-	float AccErrorX = -0.01;
-	float AccErrorY = 0.01;
-	float AccErrorZ = 0.04;
-	float GyroErrorX = 0.41;
-	float GyroErrorY = 0.17;
-	float GyroErrorZ = -0.67;
+	float _AccErrorX = 0.0;
+	float _AccErrorY = 0.0;
+	float _AccErrorZ = 0.0;
+	float _GyroErrorX = 0.0;
+	float _GyroErrorY = 0.0;
+	float _GyroErrorZ = 0.0;
+
+
+	//Magnetometer calibration parameters - if using MPU9250, uncomment calibrateMagnetometer() in void setup() to get these values, else just ignore these
+	float _MagErrorX = 0.0;
+	float _MagErrorY = 0.0; 
+	float _MagErrorZ = 0.0;
+	float _MagScaleX = 1.0;
+	float _MagScaleY = 1.0;
+	float _MagScaleZ = 1.0;
+
 
 
 	// PIDs
@@ -182,15 +200,5 @@ private:
 
 
 };
-
-
-
-
-
-
-
-
-
-
 
 #endif

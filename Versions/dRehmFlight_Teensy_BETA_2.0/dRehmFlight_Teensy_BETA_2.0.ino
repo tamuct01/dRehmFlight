@@ -31,10 +31,9 @@ Everyone that sends me pictures and videos of your flying creations! -Nick
 
 //REQUIRED LIBRARIES (included with download in main sketch folder)
 // #include "src/dRhemFlight_hardware.h"
-// #include <Wire.h>     //I2c communication
-// #include <SPI.h>      //SPI communication
 #include <PWMServo.h> //Commanding any extra actuators, installed with teensyduino installer
-#include "src/IMU_PID/IMU_PID.h"
+#include "src/IMU_Wrapper/IMU_Wrapper.h"
+#include "src/RadioComm/RadioComm.h"
 
 
 
@@ -83,6 +82,10 @@ const int ch4Pin = 20; //rudd
 const int ch5Pin = 21; //gear (throttle cut)
 const int ch6Pin = 22; //aux1 (free aux channel)
 const int PPM_Pin = 23;
+
+
+
+
 //OneShot125 ESC pin outputs:
 const int m1Pin = 0;
 const int m2Pin = 1;
@@ -112,8 +115,16 @@ PWMServo servo4;
 
 // declare IMU and pins
 
-IMU myIMU(MPU6050_I2C);
+IMU_Wrapper imu(LSM6DSOX_SPI);
 // values are MPU6050_I2C (Default), MPU9250_SPI, LSM6DSOX_SPI
+// Defaults to  GYRO_250DPS and ACCEL_2G.  You can change the sensitivity by altering these in the call above.
+// example:  IMU imu(LSM6DSOX_SPI, GYRO_1000DPS, ACCEL_8G);
+
+// Needed for MPU9250_SPI and LSM6DSOX_SPI.  Comment these out for MPU6050_I2C
+#define IMU_CS   10    // CS2--green-yellow
+#define IMU_SCK  13    // SCK2/SCL--white
+#define IMU_MISO 12    // MISO2/DO--red
+#define IMU_MOSI 11    // MOSI2/SDA--black
 
 /*
 IMU Pin locations for IMU:
@@ -124,16 +135,16 @@ defaults for Teensy 4.0:
     SCL -> pin 19
 
   default pins for MPU9250 using SPI:
-    MISO -> pin 34
-	  MOSI -> pin 35
     CS   -> pin 36
     SCK  -> pin 37
+    MISO -> pin 34
+	  MOSI -> pin 35
 
   default pins for Adafruit LSM6DSOX:
-    MISO -> pin 34
-	  MOSI -> pin 35
     CS   -> pin 36
     SCK  -> pin 37
+    MISO -> pin 34
+	  MOSI -> pin 35
 */
 
 
@@ -152,34 +163,31 @@ bool blinkAlternate;
 unsigned long channel_1_pwm, channel_2_pwm, channel_3_pwm, channel_4_pwm, channel_5_pwm, channel_6_pwm;
 unsigned long channel_1_pwm_prev, channel_2_pwm_prev, channel_3_pwm_prev, channel_4_pwm_prev;
 
+// How many input channels do you have?
+#define NUM_CHANNELS  12
 
+// Holder array for radio PWM data
+unsigned long channel_pwm[NUM_CHANNELS];
 
+// Define the radio object
+RadioComm radio(sBUS, NUM_CHANNELS);
+// RadioComm radio(DSM, NUM_CHANNELS);
+// RadioComm radio(PPM, NUM_CHANNELS);
+// RadioComm radio(PWM, NUM_CHANNELS);
+// Set the type of RC radio you are using and the number of input channels you are using
+// Radio options are:  PWM, PPM, DSM, or sBUS.
+// Max number of channels is 8 for PPM/PWM and 16 for SBUS.  The default is 6.
+// example:  RadioComm radio(PPM, 6);
 
-//Uncomment only one receiver type
-//#define USE_PWM_RX
-//#define USE_PPM_RX
-#define USE_SBUS_RX
-//#define USE_DSM_RX
-static const uint8_t num_DSM_channels = 6; //If using DSM RX, change this to match the number of transmitter channels you have
+//Note: If using SBUS, connect to pin 21 (RX5), if using DSM, connect to pin 15 (RX3)
+// const int ch1Pin = 15; //throttle
+// const int ch2Pin = 16; //ail
+// const int ch3Pin = 17; //ele
+// const int ch4Pin = 20; //rudd
+// const int ch5Pin = 21; //gear (throttle cut)
+// const int ch6Pin = 22; //aux1 (free aux channel)
+// const int PPM_Pin = 23;
 
-// Other defines that depend on the above
-#if defined USE_SBUS_RX
-  #include "src/SBUS/SBUS.h"   //sBus interface
-#endif
-
-#if defined USE_DSM_RX
-  #include "src/DSMRX/DSMRX.h"  
-#endif
-
-#if defined USE_SBUS_RX
-  SBUS sbus(Serial5);
-  uint16_t sbusChannels[16];
-  bool sbusFailSafe;
-  bool sbusLostFrame;
-#endif
-#if defined USE_DSM_RX
-  DSM1024 DSM;
-#endif
 
 
 
@@ -224,10 +232,12 @@ void setup() {
   //Set built in LED to turn on to signal startup
   digitalWrite(13, HIGH);
 
-  delay(5);
+  delay(500);
 
   //Initialize radio communication
-  radioSetup();
+  // radioSetup();
+  radio.begin();
+
   
   //Set radio channels to default (safe) values before entering main loop
   channel_1_pwm = channel_1_fs;
@@ -238,14 +248,36 @@ void setup() {
   channel_6_pwm = channel_6_fs;
 
   //Initialize IMU communication
-  if (!myIMU.begin()) {  
+  // Needed for MPU9250_SPI and LSM6DSOX_SPI.  Comment this out for MPU6050_I2C
+  imu.setSPIpins(IMU_CS, IMU_SCK, IMU_MISO, IMU_MOSI);
+
+  if (!imu.begin()) {  
     Serial.println("IMU init failed!");
     while (1);
   }
-  delay(5);
+  delay(500);
 
-  //Get IMU error to zero accelerometer and gyro readings, assuming vehicle is level when powered up
-  //myIMU.calculate_IMU_error(); //Calibration parameters printed to serial monitor. Paste these in the user specified variables section, then comment this out forever.
+  // Get IMU error to zero accelerometer and gyro readings, assuming vehicle is level when powered up
+  // imu.calculate_IMU_error(); //Calibration parameters printed to serial monitor. Paste these in the user specified variables section, then comment this out forever.
+  
+  // Replace the following with the values from the calculate_IMU_error() output above:
+  imu.setAccError(0.0, 0.0, 0.0);
+  imu.setGyroError(0.0, 0.0, 0.0);
+  
+  // LSM6DSOX
+  // imu.setAccError(-0.02, 0.01, 0.03);
+  // imu.setGyroError(-0.24, -0.37, -0.42);
+
+
+  // If using MPU9250 IMU, uncomment for one-time magnetometer calibration (may need to repeat for new locations)
+  // imu.calibrateMagnetometer(); //Generates magentometer error and scale factors to be pasted in user-specified variables section
+
+  // If using MPU9250 IMU, replace the below with the output from calibrateMagnetometer() above
+  // imu.setMagError(0.0, 0.0, 0.0);
+  // imu.setMagScale(1.0, 1.0, 1.0);
+
+
+
 
   //Arm servo channels
   servo1.write(0); //Command servo angle from 0-180 degrees (1000 to 2000 PWM)
@@ -256,7 +288,7 @@ void setup() {
   // servo6.write(0);
   // servo7.write(0);
   
-  delay(5);
+  delay(500);
 
   //calibrateESCs(); //PROPS OFF. Uncomment this to calibrate your ESCs by setting throttle stick to max, powering on, and lowering throttle to zero after the beeps
   //Code will not proceed past here if this function is uncommented!
@@ -273,8 +305,6 @@ void setup() {
   //Indicate entering main loop with 3 quick blinks
   setupBlink(3,160,70); //numBlinks, upTime (ms), downTime (ms)
 
-  //If using MPU9250 IMU, uncomment for one-time magnetometer calibration (may need to repeat for new locations)
-  //myIMU.calibrateMagnetometer(); //Generates magentometer error and scale factors to be pasted in user-specified variables section
 
 }
 
@@ -293,9 +323,9 @@ void loop() {
   loopBlink(); //Indicate we are in main loop with short blink every 1.5 seconds
 
   //Print data at 100hz (uncomment one at a time for troubleshooting) - SELECT ONE:
-  //printRadioData();     //Prints radio pwm values (expected: 1000 to 2000)
+  printRadioData();     //Prints radio pwm values (expected: 1000 to 2000)
   //printDesiredState();  //Prints desired vehicle state commanded in either degrees or deg/sec (expected: +/- maxAXIS for roll, pitch, yaw; 0 to 1 for throttle)
-  printGyroData();      //Prints filtered gyro data direct from IMU (expected: ~ -250 to 250, 0 at rest)
+  //printGyroData();      //Prints filtered gyro data direct from IMU (expected: ~ -250 to 250, 0 at rest)
   //printAccelData();     //Prints filtered accelerometer data direct from IMU (expected: ~ -2 to 2; x,y 0 when level, z 1 when level)
   //printMagData();       //Prints filtered magnetometer data direct from IMU (expected: ~ -300 to 300)
   //printRollPitchYaw();  //Prints roll, pitch, and yaw angles in degrees from Madgwick filter (expected: degrees, 0 when level)
@@ -305,41 +335,42 @@ void loop() {
   //printLoopRate();      //Prints the time between loops in microseconds (expected: microseconds between loop iterations)
 
   // Get arming status
-  armedStatus(); //Check if the throttle cut is off and throttle is low.
+  // armedStatus(); //Check if the throttle cut is off and throttle is low.
 
   //Get vehicle state
-  myIMU.getIMUdata(); //Pulls raw gyro, accelerometer, and magnetometer data from IMU and LP filters to remove noise
-  // myIMU.Madgwick(GyroX, -GyroY, -GyroZ, -AccX, AccY, AccZ, MagY, -MagX, MagZ, dt); //Updates roll_IMU, pitch_IMU, and yaw_IMU angle estimates (degrees
-  myIMU.Madgwick(dt); //Updates roll_IMU, pitch_IMU, and yaw_IMU angle estimates (degrees)
+  imu.getIMUdata(); //Pulls raw gyro, accelerometer, and magnetometer data from IMU and LP filters to remove noise
+  imu.Madgwick(dt); //Updates roll_IMU, pitch_IMU, and yaw_IMU angle estimates (degrees)
 
   //Compute desired state
-  getDesState(); //Convert raw commands to normalized values based on saturated control limits
+  // getDesState(); //Convert raw commands to normalized values based on saturated control limits
   
   //PID Controller - SELECT ONE:
-  myIMU.controlANGLE(roll_des, pitch_des, yaw_des, dt, channel_1_pwm); //Stabilize on angle setpoint
-  //myIMU.controlANGLE2(roll_des, pitch_des, yaw_des, dt, channel_1_pwm); //Stabilize on angle setpoint using cascaded method. Rate controller must be tuned well first!
-  //myIMU.controlRATE(roll_des, pitch_des, yaw_des, dt, channel_1_pwm); //Stabilize on rate setpoint
+  imu.controlANGLE(roll_des, pitch_des, yaw_des, dt, channel_1_pwm); //Stabilize on angle setpoint
+  //imu.controlANGLE2(roll_des, pitch_des, yaw_des, dt, channel_1_pwm); //Stabilize on angle setpoint using cascaded method. Rate controller must be tuned well first!
+  //imu.controlRATE(roll_des, pitch_des, yaw_des, dt, channel_1_pwm); //Stabilize on rate setpoint
 
   //Actuator mixing and scaling to PWM values
-  controlMixer(); //Mixes PID outputs to scaled actuator commands -- custom mixing assignments done here
-  scaleCommands(); //Scales motor commands to 125 to 250 range (oneshot125 protocol) and servo PWM commands to 0 to 180 (for servo library)
+  // controlMixer(); //Mixes PID outputs to scaled actuator commands -- custom mixing assignments done here
+  // scaleCommands(); //Scales motor commands to 125 to 250 range (oneshot125 protocol) and servo PWM commands to 0 to 180 (for servo library)
 
   //Throttle cut check
-  throttleCut(); //Directly sets motor commands to low based on state of ch5
+  // throttleCut(); //Directly sets motor commands to low based on state of ch5
 
   //Command actuators
-  commandMotors(); //Sends command pulses to each motor pin using OneShot125 protocol
-  servo1.write(s1_command_PWM); //Writes PWM value to servo object
-  servo2.write(s2_command_PWM);
-  servo3.write(s3_command_PWM);
-  servo4.write(s4_command_PWM);
+  // commandMotors(); //Sends command pulses to each motor pin using OneShot125 protocol
+  // servo1.write(s1_command_PWM); //Writes PWM value to servo object
+  // servo2.write(s2_command_PWM);
+  // servo3.write(s3_command_PWM);
+  // servo4.write(s4_command_PWM);
   // servo5.write(s5_command_PWM);
   // servo6.write(s6_command_PWM);
   // servo7.write(s7_command_PWM);
     
   //Get vehicle commands for next loop iteration
-  getCommands(); //Pulls current available radio commands
-  failSafe(); //Prevent failures in event of bad receiver connection, defaults to failsafe values assigned in setup
+  // getCommands(); //Pulls current available radio commands
+  radio.getCommands(channel_pwm); //Pulls current available radio commands
+
+  // failSafe(); //Prevent failures in event of bad receiver connection, defaults to failsafe values assigned in setup
 
   //Regulate loop rate
   loopRate(2000); //Do not exceed 2000Hz, all filter parameters tuned to 2000Hz by default
@@ -371,10 +402,10 @@ void controlMixer() {
    */
    
   //Quad mixing - EXAMPLE
-  m1_command_scaled = thro_des - myIMU.pitch_PID + myIMU.roll_PID + myIMU.yaw_PID; //Front Left
-  m2_command_scaled = thro_des - myIMU.pitch_PID - myIMU.roll_PID - myIMU.yaw_PID; //Front Right
-  m3_command_scaled = thro_des + myIMU.pitch_PID - myIMU.roll_PID + myIMU.yaw_PID; //Back Right
-  m4_command_scaled = thro_des + myIMU.pitch_PID + myIMU.roll_PID - myIMU.yaw_PID; //Back Left
+  m1_command_scaled = thro_des - imu.pitch_PID + imu.roll_PID + imu.yaw_PID; //Front Left
+  m2_command_scaled = thro_des - imu.pitch_PID - imu.roll_PID - imu.yaw_PID; //Front Right
+  m3_command_scaled = thro_des + imu.pitch_PID - imu.roll_PID + imu.yaw_PID; //Back Right
+  m4_command_scaled = thro_des + imu.pitch_PID + imu.roll_PID - imu.yaw_PID; //Back Left
   m5_command_scaled = 0;
   m6_command_scaled = 0;
 
@@ -408,8 +439,8 @@ void calibrateAttitude() {
     prev_time = current_time;      
     current_time = micros();      
     dt = (current_time - prev_time)/1000000.0; 
-    myIMU.getIMUdata();
-    myIMU.Madgwick(dt);
+    imu.getIMUdata();
+    imu.Madgwick(dt);
     loopRate(2000); //do not exceed 2000Hz
   }
 }
@@ -484,64 +515,64 @@ void scaleCommands() {
 
 }
 
-void getCommands() {
-  //DESCRIPTION: Get raw PWM values for every channel from the radio
-  /*
-   * Updates radio PWM commands in loop based on current available commands. channel_x_pwm is the raw command used in the rest of 
-   * the loop. If using a PWM or PPM receiver, the radio commands are retrieved from a function in the readPWM file separate from this one which 
-   * is running a bunch of interrupts to continuously update the radio readings. If using an SBUS receiver, the alues are pulled from the SBUS library directly.
-   * The raw radio commands are filtered with a first order low-pass filter to eliminate any really high frequency noise. 
-   */
+// void getCommands() {
+//   //DESCRIPTION: Get raw PWM values for every channel from the radio
+//   /*
+//    * Updates radio PWM commands in loop based on current available commands. channel_x_pwm is the raw command used in the rest of 
+//    * the loop. If using a PWM or PPM receiver, the radio commands are retrieved from a function in the readPWM file separate from this one which 
+//    * is running a bunch of interrupts to continuously update the radio readings. If using an SBUS receiver, the alues are pulled from the SBUS library directly.
+//    * The raw radio commands are filtered with a first order low-pass filter to eliminate any really high frequency noise. 
+//    */
 
-  #if defined USE_PPM_RX || defined USE_PWM_RX
-    channel_1_pwm = getRadioPWM(1);
-    channel_2_pwm = getRadioPWM(2);
-    channel_3_pwm = getRadioPWM(3);
-    channel_4_pwm = getRadioPWM(4);
-    channel_5_pwm = getRadioPWM(5);
-    channel_6_pwm = getRadioPWM(6);
+//   #if defined USE_PPM_RX || defined USE_PWM_RX
+//     channel_1_pwm = getRadioPWM(1);
+//     channel_2_pwm = getRadioPWM(2);
+//     channel_3_pwm = getRadioPWM(3);
+//     channel_4_pwm = getRadioPWM(4);
+//     channel_5_pwm = getRadioPWM(5);
+//     channel_6_pwm = getRadioPWM(6);
     
-  #elif defined USE_SBUS_RX
-    if (sbus.read(&sbusChannels[0], &sbusFailSafe, &sbusLostFrame)) {
-      //sBus scaling below is for Taranis-Plus and X4R-SB
-      float scale = 0.615;  
-      float bias  = 895.0; 
-      channel_1_pwm = sbusChannels[0] * scale + bias;
-      channel_2_pwm = sbusChannels[1] * scale + bias;
-      channel_3_pwm = sbusChannels[2] * scale + bias;
-      channel_4_pwm = sbusChannels[3] * scale + bias;
-      channel_5_pwm = sbusChannels[4] * scale + bias;
-      channel_6_pwm = sbusChannels[5] * scale + bias; 
-    }
+//   #elif defined USE_SBUS_RX
+//     if (sbus.read(&sbusChannels[0], &sbusFailSafe, &sbusLostFrame)) {
+//       //sBus scaling below is for Taranis-Plus and X4R-SB
+//       float scale = 0.615;  
+//       float bias  = 895.0; 
+//       channel_1_pwm = sbusChannels[0] * scale + bias;
+//       channel_2_pwm = sbusChannels[1] * scale + bias;
+//       channel_3_pwm = sbusChannels[2] * scale + bias;
+//       channel_4_pwm = sbusChannels[3] * scale + bias;
+//       channel_5_pwm = sbusChannels[4] * scale + bias;
+//       channel_6_pwm = sbusChannels[5] * scale + bias; 
+//     }
 
-  #elif defined USE_DSM_RX
-    if (DSM.timedOut(micros())) {
-        //Serial.println("*** DSM RX TIMED OUT ***");
-    }
-    else if (DSM.gotNewFrame()) {
-        uint16_t values[num_DSM_channels];
-        DSM.getChannelValues(values, num_DSM_channels);
+//   #elif defined USE_DSM_RX
+//     if (DSM.timedOut(micros())) {
+//         //Serial.println("*** DSM RX TIMED OUT ***");
+//     }
+//     else if (DSM.gotNewFrame()) {
+//         uint16_t values[num_DSM_channels];
+//         DSM.getChannelValues(values, num_DSM_channels);
 
-        channel_1_pwm = values[0];
-        channel_2_pwm = values[1];
-        channel_3_pwm = values[2];
-        channel_4_pwm = values[3];
-        channel_5_pwm = values[4];
-        channel_6_pwm = values[5];
-    }
-  #endif
+//         channel_1_pwm = values[0];
+//         channel_2_pwm = values[1];
+//         channel_3_pwm = values[2];
+//         channel_4_pwm = values[3];
+//         channel_5_pwm = values[4];
+//         channel_6_pwm = values[5];
+//     }
+//   #endif
   
-  //Low-pass the critical commands and update previous values
-  float b = 0.7; //Lower=slower, higher=noiser
-  channel_1_pwm = (1.0 - b)*channel_1_pwm_prev + b*channel_1_pwm;
-  channel_2_pwm = (1.0 - b)*channel_2_pwm_prev + b*channel_2_pwm;
-  channel_3_pwm = (1.0 - b)*channel_3_pwm_prev + b*channel_3_pwm;
-  channel_4_pwm = (1.0 - b)*channel_4_pwm_prev + b*channel_4_pwm;
-  channel_1_pwm_prev = channel_1_pwm;
-  channel_2_pwm_prev = channel_2_pwm;
-  channel_3_pwm_prev = channel_3_pwm;
-  channel_4_pwm_prev = channel_4_pwm;
-}
+//   //Low-pass the critical commands and update previous values
+//   float b = 0.7; //Lower=slower, higher=noiser
+//   channel_1_pwm = (1.0 - b)*channel_1_pwm_prev + b*channel_1_pwm;
+//   channel_2_pwm = (1.0 - b)*channel_2_pwm_prev + b*channel_2_pwm;
+//   channel_3_pwm = (1.0 - b)*channel_3_pwm_prev + b*channel_3_pwm;
+//   channel_4_pwm = (1.0 - b)*channel_4_pwm_prev + b*channel_4_pwm;
+//   channel_1_pwm_prev = channel_1_pwm;
+//   channel_2_pwm_prev = channel_2_pwm;
+//   channel_3_pwm_prev = channel_3_pwm;
+//   channel_4_pwm_prev = channel_4_pwm;
+// }
 
 void failSafe() {
   //DESCRIPTION: If radio gives garbage values, set all commands to default values
@@ -680,11 +711,11 @@ void calibrateESCs() {
     
       digitalWrite(13, HIGH); //LED on to indicate we are not in main loop
 
-      getCommands(); //Pulls current available radio commands
+      // getCommands(); //Pulls current available radio commands
       failSafe(); //Prevent failures in event of bad receiver connection, defaults to failsafe values assigned in setup
       getDesState(); //Convert raw commands to normalized values based on saturated control limits
-      myIMU.getIMUdata(); //Pulls raw gyro, accelerometer, and magnetometer data from IMU and LP filters to remove noise
-      myIMU.Madgwick(dt); //Updates roll_IMU, pitch_IMU, and yaw_IMU (degrees)
+      imu.getIMUdata(); //Pulls raw gyro, accelerometer, and magnetometer data from IMU and LP filters to remove noise
+      imu.Madgwick(dt); //Updates roll_IMU, pitch_IMU, and yaw_IMU (degrees)
       getDesState(); //Convert raw commands to normalized values based on saturated control limits
       
       m1_command_scaled = thro_des;
@@ -868,18 +899,13 @@ void printRadioData() {
     print_counter = micros();
     Serial.print(F("LOW:1000.0"));
     Serial.print(F(" HIGH:2000.0"));
-    Serial.print(F(" CH1:"));
-    Serial.print(channel_1_pwm);
-    Serial.print(F(" CH2:"));
-    Serial.print(channel_2_pwm);
-    Serial.print(F(" CH3:"));
-    Serial.print(channel_3_pwm);
-    Serial.print(F(" CH4:"));
-    Serial.print(channel_4_pwm);
-    Serial.print(F(" CH5:"));
-    Serial.print(channel_5_pwm);
-    Serial.print(F(" CH6:"));
-    Serial.println(channel_6_pwm);
+    for (int8_t i = 0; i < NUM_CHANNELS; i++) {
+      Serial.print(F(" CH"));
+      Serial.print(i+1);
+      Serial.print(F(":"));
+      Serial.print(channel_pwm[i]);
+    }
+    Serial.println(F(""));
   }
 }
 
@@ -905,11 +931,11 @@ void printGyroData() {
     Serial.print(F("LOW:-300.0"));
     Serial.print(F(" HIGH:300.0"));
     Serial.print(F(" GyroX:"));
-    Serial.print(myIMU.GyroX);
+    Serial.print(imu.GyroX);
     Serial.print(F(" GyroY:"));
-    Serial.print(myIMU.GyroY);
+    Serial.print(imu.GyroY);
     Serial.print(F(" GyroZ:"));
-    Serial.println(myIMU.GyroZ);
+    Serial.println(imu.GyroZ);
   }
 }
 
@@ -919,11 +945,11 @@ void printAccelData() {
     Serial.print(F("LOW:-2.0"));
     Serial.print(F(" HIGH:2.0"));
     Serial.print(F(" AccX:"));
-    Serial.print(myIMU.AccX);
+    Serial.print(imu.AccX);
     Serial.print(F(" AccY:"));
-    Serial.print(myIMU.AccY);
+    Serial.print(imu.AccY);
     Serial.print(F(" AccZ:"));
-    Serial.println(myIMU.AccZ);
+    Serial.println(imu.AccZ);
   }
 }
 
@@ -933,11 +959,11 @@ void printMagData() {
     Serial.print(F("LOW:-300.0"));
     Serial.print(F(" HIGH:300.0"));
     Serial.print(F(" MagX:"));
-    Serial.print(myIMU.MagX);
+    Serial.print(imu.MagX);
     Serial.print(F(" MagY:"));
-    Serial.print(myIMU.MagY);
+    Serial.print(imu.MagY);
     Serial.print(F(" MagZ:"));
-    Serial.println(myIMU.MagZ);
+    Serial.println(imu.MagZ);
   }
 }
 
@@ -947,11 +973,11 @@ void printRollPitchYaw() {
     Serial.print(F("LOW:-180.0"));
     Serial.print(F(" HIGH:180.0"));
     Serial.print(F(" roll:"));
-    Serial.print(myIMU.roll_IMU);
+    Serial.print(imu.roll_IMU);
     Serial.print(F(" pitch:"));
-    Serial.print(myIMU.pitch_IMU);
+    Serial.print(imu.pitch_IMU);
     Serial.print(F(" yaw:"));
-    Serial.println(myIMU.yaw_IMU);
+    Serial.println(imu.yaw_IMU);
   }
 }
 
@@ -961,11 +987,11 @@ void printPIDoutput() {
     Serial.print(F("LOW:-1.0"));
     Serial.print(F(" HIGH:1.0"));
     Serial.print(F(" roll_PID:"));
-    Serial.print(myIMU.roll_PID);
+    Serial.print(imu.roll_PID);
     Serial.print(F(" pitch_PID:"));
-    Serial.print(myIMU.pitch_PID);
+    Serial.print(imu.pitch_PID);
     Serial.print(F(" yaw_PID:"));
-    Serial.println(myIMU.yaw_PID);
+    Serial.println(imu.yaw_PID);
   }
 }
 
