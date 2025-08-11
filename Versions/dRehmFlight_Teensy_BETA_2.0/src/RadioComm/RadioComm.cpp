@@ -1,12 +1,15 @@
+//Arduino/Teensy Flight Controller - dRehmFlight
+//Author: Nicholas Rehm
+//Additional Author: Brian Jones
+//Project Start: 1/6/2020
+//Last Updated: 8/11/2025
+//Version: Beta 2.0
 
-// RadioComm.cpp
-// This is a wrapper for IMU chips supported by dRehmFlight.  It consolidates all the IMU handling and PID subrutines into a single library that most people won't need to mess with.
+//========================================================================================================================//
 
-
+//This file contains all necessary functions and code used for radio communication to avoid cluttering the main code
 
 #include "RadioComm.h"
-
-
 
 RadioComm::RadioComm(RadioType type): RadioComm(type, 6) {};
 
@@ -19,8 +22,6 @@ RadioComm::RadioComm(RadioType type, uint8_t num_channels) {
     _type = type;
     _num_channels = num_channels;
 }
-
-
 
 
 void RadioComm::begin() {
@@ -45,6 +46,7 @@ void RadioComm::begin() {
     }
 }
 
+
 void RadioComm::begin(int PPM_Pin) {
 
     if (_type == PPM) {
@@ -52,8 +54,6 @@ void RadioComm::begin(int PPM_Pin) {
         // _ppm->begin(PPM_Pin, false);
         // ppm.begin(PPM_Pin, false);
         // PPMReader _ppm(PPM_Pin, _num_channels);
-
-
     }
 
     else {
@@ -62,19 +62,13 @@ void RadioComm::begin(int PPM_Pin) {
     }
 }
 
-    
-
-
-
 
 void RadioComm::getCommands(unsigned int* returnArray) {
-  //DESCRIPTION: Get raw PWM values for every channel from the radio
-  /*
-   * Updates radio PWM commands in loop based on current available commands. channel_x_pwm is the raw command used in the rest of 
-   * the loop. If using a PWM or PPM receiver, the radio commands are retrieved from a function in the readPWM file separate from this one which 
-   * is running a bunch of interrupts to continuously update the radio readings. If using an SBUS receiver, the alues are pulled from the SBUS library directly.
-   * The raw radio commands are filtered with a first order low-pass filter to eliminate any really high frequency noise. 
-   */
+    //DESCRIPTION: Get raw PWM values for every channel from the radio
+    /*
+    * Updates radio PWM commands in loop based on current available commands. The array channel_pwm[] is the raw command used in the rest of the loop.
+    * The raw radio commands of the first four control channels are filtered with a first order low-pass filter to eliminate any really high frequency noise. 
+    */
 
    int8_t i;
     if (_type == sBUS) {
@@ -87,7 +81,6 @@ void RadioComm::getCommands(unsigned int* returnArray) {
         // }
         // _sbusFailSafe = _sbus_data.failsafe;
         // _sbusLostFrame = _sbus_data.lost_frame;
-
 
         if (_sbus->read(_sbusChannels, &_sbusFailSafe, &_sbusLostFrame)) {
             for (i = 0; i < _num_channels; i++) {
@@ -116,8 +109,6 @@ void RadioComm::getCommands(unsigned int* returnArray) {
         }
     }
 
-
-
     else {
         // Should probably have an error here
     }
@@ -139,13 +130,20 @@ void RadioComm::getCommands(unsigned int* returnArray) {
 
 
 void RadioComm::setFailsafe(unsigned int* failsafeArray) {
+    //DESCRIPTION: Used after initialization to set failsafe values for the receiver
+    /*
+    * This sets the failsafe values, typically throttle off and control surfaces neutral, so that in the event of a loss
+    * of radio signal, the craft will likely crash instead of fly away.
+    * 
+    * Input values should be in the range of 1000-2000 microseconds, as normally delivered by the RC receiver.
+    * 1000 us == low throttle position
+    * 1500 us == center servo position
+    */
+
     for (int8_t i=0; i<_num_channels; i++) {
         _channel_fs[i] = failsafeArray[i];
     }
 }
-
-
-
 
 
 void RadioComm::failSafe() {
@@ -164,7 +162,7 @@ void RadioComm::failSafe() {
     */
     int8_t i;
 
-    //If using SBUS, this will only check the boolean failsafe value from the SBUS library.  If using PWM RX, it checks each channel.
+    //If using SBUS, this will only check the boolean failsafe value from the SBUS library.  If using PPM/DSM RX, it checks each channel.
     if (_type == sBUS) {
         if (_sbusFailSafe) {
             for (i=0; i<_num_channels; i++) {
@@ -197,5 +195,3 @@ void RadioComm::failSafe() {
         }
     }
 }
-
-

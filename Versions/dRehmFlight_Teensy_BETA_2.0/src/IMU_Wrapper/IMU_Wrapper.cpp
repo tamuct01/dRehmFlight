@@ -1,12 +1,15 @@
+//Arduino/Teensy Flight Controller - dRehmFlight
+//Author: Nicholas Rehm
+//Additional Author: Brian Jones
+//Project Start: 1/6/2020
+//Last Updated: 8/11/2025
+//Version: Beta 2.0
 
+//========================================================================================================================//
 
-// IMU_Wrapper.cpp
 // This is a wrapper for IMU chips supported by dRehmFlight.  It consolidates all the IMU handling and PID subrutines into a single library that most people won't need to mess with.
 
-
-
 #include "IMU_Wrapper.h"
-
 
 IMU_Wrapper::IMU_Wrapper(IMUType type): IMU_Wrapper(type, GYRO_250DPS, ACCEL_2G) {};
 
@@ -51,15 +54,6 @@ IMU_Wrapper::IMU_Wrapper(IMUType type, Gyro_DPS gyroDPS, Accel_G accelG) {
     }
 }
     
-
-
-
-
-
-
-
-
-  
 
 bool IMU_Wrapper::begin() {
   switch (_type) {
@@ -130,6 +124,9 @@ bool IMU_Wrapper::begin() {
         Serial.println(status);
         return false;
       }
+      else {
+        Serial.println("MPU9250 initialization successful");
+      }
 
       //From the reset state all registers should be 0x00, so we should be at
       //max sample rate with digital low pass filter(s) off.  All we need to
@@ -180,7 +177,7 @@ bool IMU_Wrapper::begin() {
         return false;
       }
       else {
-        Serial.println("LSM6DSOX Found!");
+        Serial.println("LSM6DSOX initialization successful");
       }
   
       switch (_gyroDPS) {
@@ -211,10 +208,6 @@ bool IMU_Wrapper::begin() {
             _lsm6dsox->setAccelRange(lsm6ds_accel_range_t::LSM6DS_ACCEL_RANGE_16_G);
             break;
         }
-
-        // Set the data rate of the board higher than stock 104Hz
-        // lsm6dsox.setAccelDataRate(LSM6DS_RATE_6_66K_HZ);
-        // lsm6dsox.setGyroDataRate(LSM6DS_RATE_6_66K_HZ);
         return true;
       }
 
@@ -231,9 +224,6 @@ void IMU_Wrapper::setSPIpins(int8_t cs_pin, int8_t sck_pin, int8_t miso_pin, int
 	_miso_pin = miso_pin;
 	_mosi_pin = mosi_pin;
 }
-
-
-
 
 
 void IMU_Wrapper::getIMUdata() {
@@ -350,8 +340,6 @@ void IMU_Wrapper::getIMUdata() {
 }
 
 
-
-
 void IMU_Wrapper::calculate_IMU_error() {
   //DESCRIPTION: Computes IMU accelerometer and gyro error on startup. Note: vehicle should be powered up on flat surface
   /*
@@ -455,7 +443,6 @@ void IMU_Wrapper::calculate_IMU_error() {
 }
 
 
-
 void IMU_Wrapper::calibrateMagnetometer() {
   if (_type == MPU9250_SPI) {
     float success;
@@ -501,10 +488,7 @@ void IMU_Wrapper::calibrateMagnetometer() {
 }
 
 
-
-
 void IMU_Wrapper::Madgwick(float invSampleFreq) {
-
 	float gx = GyroX;
 	float gy = -GyroY;
 	float gz = -GyroZ;
@@ -514,7 +498,6 @@ void IMU_Wrapper::Madgwick(float invSampleFreq) {
 	float mx = MagY;
 	float my = -MagX;
 	float mz = MagZ;
-
 
   //DESCRIPTION: Attitude estimation through sensor fusion - 9DOF
   /*
@@ -718,9 +701,6 @@ void IMU_Wrapper::Madgwick6DOF(float gx, float gy, float gz, float ax, float ay,
 }
 
 
-
-
-
 void IMU_Wrapper::controlANGLE(float roll_des, float pitch_des, float yaw_des, float dt, unsigned long throttle) {
   //DESCRIPTION: Computes control commands based on state error (angle)
   /*
@@ -772,6 +752,7 @@ void IMU_Wrapper::controlANGLE(float roll_des, float pitch_des, float yaw_des, f
   error_yaw_prev = error_yaw;
   integral_yaw_prev = integral_yaw;
 }
+
 
 void IMU_Wrapper::controlANGLE2(float roll_des, float pitch_des, float yaw_des, float dt, unsigned long throttle) {
   //DESCRIPTION: Computes control commands based on state error (angle) in cascaded scheme
@@ -856,8 +837,8 @@ void IMU_Wrapper::controlANGLE2(float roll_des, float pitch_des, float yaw_des, 
   //Update yaw variables
   error_yaw_prev = error_yaw;
   integral_yaw_prev = integral_yaw;
-
 }
+
 
 void IMU_Wrapper::controlRATE(float roll_des, float pitch_des, float yaw_des, float dt, unsigned long throttle) {
   //DESCRIPTION: Computes control commands based on state error (rate)
@@ -908,113 +889,91 @@ void IMU_Wrapper::controlRATE(float roll_des, float pitch_des, float yaw_des, fl
 }
 
 
-
+// Functions to return individial Gyro, Accel, and Mag values.
 float IMU_Wrapper::getGyro(char dir) {
-	if (dir == 'X') {
-		return GyroX;
-	}
-	if (dir == 'Y') {
-		return GyroY;
-	}
-	if (dir == 'Z') {
-		return GyroZ;
-	}
-  return 0.0;
+	if      (dir == 'X') return GyroX;
+  else if (dir == 'Y') return GyroY;
+	else if (dir == 'Z') return GyroZ;
+	else                 return 0.0;
 }
 
 float IMU_Wrapper::getAccel(char dir) {
-	if (dir == 'X') {
-		return AccX;
-	}
-	if (dir == 'Y') {
-		return AccY;
-	}
-	if (dir == 'Z') {
-		return AccZ;
-	}
-  return 0.0;
+	if      (dir == 'X') return AccX;
+	else if (dir == 'Y') return AccY;
+  else if (dir == 'Z') return AccZ;
+	else                 return 0.0;
 }
-
 
 float IMU_Wrapper::getMag(char dir) {
-	if (dir == 'X') {
-		return MagX;
-	}
-	if (dir == 'Y') {
-		return MagY;
-	}
-	if (dir == 'Z') {
-		return MagZ;
-	}
-  return 0.0;
+	if      (dir == 'X') return MagX;
+	else if (dir == 'Y') return MagY;
+	else if (dir == 'Z') return MagZ;
+	else                 return 0.0;
 }
 
 
-	
-  void IMU_Wrapper::setAccError(float AccErrorX, float AccErrorY, float AccErrorZ) {
-    _AccErrorX = AccErrorX;
-	  _AccErrorY = AccErrorY;
-	  _AccErrorZ = AccErrorZ;
-	}
+// Functions to set the error correction values for each sensor:  Gyro, Accel, and Mag
 
-  void IMU_Wrapper::setGyroError(float GyroErrorX, float GyroErrorY, float GyroErrorZ) {
-    _GyroErrorX = GyroErrorX;
-	  _GyroErrorY = GyroErrorY;
-	  _GyroErrorZ = GyroErrorZ;
-  }
+void IMU_Wrapper::setGyroError(float GyroErrorX, float GyroErrorY, float GyroErrorZ) {
+  _GyroErrorX = GyroErrorX;
+	_GyroErrorY = GyroErrorY;
+	_GyroErrorZ = GyroErrorZ;
+}
 
-  void IMU_Wrapper::setMagError(float MagErrorX, float MagErrorY, float MagErrorZ) {
-    _MagErrorX = MagErrorX;
-	  _MagErrorY = MagErrorY;
-	  _MagErrorZ = MagErrorZ;
-	}
+void IMU_Wrapper::setAccError(float AccErrorX, float AccErrorY, float AccErrorZ) {
+  _AccErrorX = AccErrorX;
+  _AccErrorY = AccErrorY;
+	_AccErrorZ = AccErrorZ;
+}
 
-  void IMU_Wrapper::setMagScale(float MagScaleX, float MagScaleY, float MagScaleZ) {
-    _MagScaleX = MagScaleX;
-	  _MagScaleY = MagScaleY;
-	  _MagScaleZ = MagScaleZ;
-  }
+void IMU_Wrapper::setMagError(float MagErrorX, float MagErrorY, float MagErrorZ) {
+  _MagErrorX = MagErrorX;
+	_MagErrorY = MagErrorY;
+	_MagErrorZ = MagErrorZ;
+}
 
-
-
+void IMU_Wrapper::setMagScale(float MagScaleX, float MagScaleY, float MagScaleZ) {
+  _MagScaleX = MagScaleX;
+	_MagScaleY = MagScaleY;
+	_MagScaleZ = MagScaleZ;
+}
 
 
-
-
-
-  void IMU_Wrapper::setRollAnglePID(float Kp, float Ki, float Kd) {
+// Functions to set the PID values for each of the three axis (roll, pitch, yaw) for
+// Angle mode and Rate mode. (Yaw only has rate mode)
+void IMU_Wrapper::setRollAnglePID(float Kp, float Ki, float Kd) {
     Kp_roll_angle = Kp;
     Ki_roll_angle = Ki;
     Kd_roll_angle = Kd;
-  }
-	void IMU_Wrapper::setPitchAnglePID(float Kp, float Ki, float Kd) {
+}
+
+void IMU_Wrapper::setPitchAnglePID(float Kp, float Ki, float Kd) {
     Kp_pitch_angle = Kp;
     Ki_pitch_angle = Ki;
     Kd_pitch_angle = Kd;
-  }
+}
 	
-	void IMU_Wrapper::setRollRatePID(float Kp, float Ki, float Kd) {
+void IMU_Wrapper::setRollRatePID(float Kp, float Ki, float Kd) {
     Kp_roll_rate = Kp;
     Ki_roll_rate = Ki;
     Kd_roll_rate = Kd;
-  }
+}
 
-	void IMU_Wrapper::setPitchRatePID(float Kp, float Ki, float Kd) {
+void IMU_Wrapper::setPitchRatePID(float Kp, float Ki, float Kd) {
     Kp_pitch_rate = Kp;
     Ki_pitch_rate = Ki;
     Kd_pitch_rate = Kd;
-  }
-	void IMU_Wrapper::setYawRatePID(float Kp, float Ki, float Kd) {
+}
+
+void IMU_Wrapper::setYawRatePID(float Kp, float Ki, float Kd) {
     Kp_yaw = Kp;
     Ki_yaw = Ki;
     Kd_yaw = Kd;
-  }
+}
 
 
 
-
-
-  //HELPER FUNCTIONS
+//HELPER FUNCTIONS
 
 float IMU_Wrapper::invSqrt(float x) {
   //Fast inverse sqrt for madgwick filter

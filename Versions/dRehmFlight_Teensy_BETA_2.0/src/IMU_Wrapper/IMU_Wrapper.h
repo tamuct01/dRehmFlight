@@ -1,9 +1,13 @@
+//Arduino/Teensy Flight Controller - dRehmFlight
+//Author: Nicholas Rehm
+//Additional Author: Brian Jones
+//Project Start: 1/6/2020
+//Last Updated: 8/11/2025
+//Version: Beta 2.0
 
+//========================================================================================================================//
 
-
-// IMU_Wrapper.h
 // This is a wrapper for IMU chips supported by dRehmFlight.  It consolidates all the IMU handling and PID subrutines into a single library that most people won't need to mess with.
-
 
 #ifndef IMU_Wrapper_h
 #define IMU_Wrapper_h
@@ -46,11 +50,8 @@ enum Accel_G {
 #define MS2G     0.10197162129779283f
 
 
-
-
 class IMU_Wrapper {
 public:
-	
 	IMU_Wrapper(IMUType type);
 	IMU_Wrapper(IMUType type, Gyro_DPS GyroDPS, Accel_G AccelG);
 	bool begin();
@@ -96,9 +97,6 @@ public:
 	float roll_PID = 0;
 	float pitch_PID = 0;
 	float yaw_PID = 0;
-
-
-
 private:
 	//IMU:
 	IMUType  _type;
@@ -109,26 +107,21 @@ private:
     MPU9250*  _mpu9250;
     Adafruit_LSM6DSOX* _lsm6dsox;
 
-	float _gyro_scale_factor = 131.0;
-	float _accel_scale_factor = 16384.0;
-
 	// Used for LSM6DSOX
 	sensors_event_t accel;
     sensors_event_t gyro;
     sensors_event_t temp;  //unused, but could be interesting
 
-	
+	float invSqrt(float x);
+
 	// for SPI pins definitions.  These are used by MPU9250 and LSMDSOX right now.  Defaults are the back pins (SPI2) on the Teensy 4.0
 	int8_t _cs_pin   = 36;
 	int8_t _sck_pin  = 37;
 	int8_t _miso_pin = 34;
 	int8_t _mosi_pin = 35;
-	
 
-
-
-
-	float invSqrt(float x);
+	float _gyro_scale_factor = 131.0;
+	float _accel_scale_factor = 16384.0;
 
 	float AccX_prev, AccY_prev, AccZ_prev;
 	float GyroX_prev, GyroY_prev, GyroZ_prev;
@@ -139,7 +132,6 @@ private:
 	float error_roll, error_roll_prev, roll_des_prev, integral_roll, integral_roll_il, integral_roll_ol, integral_roll_prev, integral_roll_prev_il, integral_roll_prev_ol, derivative_roll;
 	float error_pitch, error_pitch_prev, pitch_des_prev, integral_pitch, integral_pitch_il, integral_pitch_ol, integral_pitch_prev, integral_pitch_prev_il, integral_pitch_prev_ol, derivative_pitch;
 	float error_yaw, error_yaw_prev, integral_yaw, integral_yaw_prev, derivative_yaw;
-
 
 	float q0 = 1.0f; //Initialize quaternion for madgwick filter
 	float q1 = 0.0f;
@@ -160,7 +152,6 @@ private:
 	float _GyroErrorY = 0.0;
 	float _GyroErrorZ = 0.0;
 
-
 	//Magnetometer calibration parameters - if using MPU9250, uncomment calibrateMagnetometer() in void setup() to get these values, else just ignore these
 	float _MagErrorX = 0.0;
 	float _MagErrorY = 0.0; 
@@ -170,12 +161,8 @@ private:
 	float _MagScaleZ = 1.0;
 
 
-
 	// PIDs
 	float i_limit = 25.0;     //Integrator saturation level, mostly for safety (default 25.0)
-	// float maxRoll = 30.0;     //Max roll angle in degrees for angle mode (maximum ~70 degrees), deg/sec for rate mode 
-	// float maxPitch = 30.0;    //Max pitch angle in degrees for angle mode (maximum ~70 degrees), deg/sec for rate mode
-	// float maxYaw = 160.0;     //Max yaw rate in deg/sec
 
 	float Kp_roll_angle = 0.2;    //Roll P-gain - angle mode 
 	float Ki_roll_angle = 0.3;    //Roll I-gain - angle mode
@@ -196,9 +183,6 @@ private:
 	float Kp_yaw = 0.3;           //Yaw P-gain
 	float Ki_yaw = 0.05;          //Yaw I-gain
 	float Kd_yaw = 0.00015;       //Yaw D-gain (be careful when increasing too high, motors will begin to overheat!)
-
-
-
 };
 
 #endif

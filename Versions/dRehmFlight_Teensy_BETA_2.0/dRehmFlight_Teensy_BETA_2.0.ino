@@ -240,6 +240,19 @@ void setup() {
   // If using MPU9250 IMU, replace the below with the output from calibrateMagnetometer() above
   // imu.setMagError(0.0, 0.0, 0.0);
   // imu.setMagScale(1.0, 1.0, 1.0);
+
+  // This sets the PID values for Rate and Angle modes based on Nick's Github defaults.  These can be altered within the control loop as well for adjustments in flight either with fader variables, control inputs, etc.
+  // I put these here as an example of use.
+  imu.setRollAnglePID(0.2, 0.3, 0.05);
+  imu.setPitchAnglePID(0.2, 0.3, 0.05);
+
+  imu.setRollRatePID(0.15, 0.2, 0.0002);
+  imu.setPitchRatePID(0.15, 0.2, 0.0002);
+
+  imu.setYawRatePID(0.3, 0.05, 0.00015);
+
+
+
   //========================================================================================================================//
 
   delay(500);
@@ -303,7 +316,7 @@ void loop() {
   // Write outputs to all servos, ESCs, and motors
   Servos.commandAll(s_command_scaled);
   Escs.commandAll(e_command_scaled);
-  Motors.commandMotors(m_command_scaled);
+  Motors.commandAll(m_command_scaled);
 
 
   //Get vehicle commands for next loop iteration
@@ -317,7 +330,7 @@ void loop() {
 
 
 //========================================================================================================================//
-//                                                      FUNCTIONS                                                         //                           
+//                                                 MIXER FUNCTIONS                                                        //                           
 //========================================================================================================================//
 
 
@@ -365,118 +378,6 @@ void controlMixer() {
 
  
 }
-
-void armedStatus() {
-  //DESCRIPTION: Check if the throttle cut is off and the throttle input is low to prepare for flight.
-  if ((channel_pwm[4] < 1500) && (channel_pwm[0] < 1050)) {
-    if (armedFly == false) {
-      Serial.println(F("ARMED!"));
-    }
-    armedFly = true;
-  }
-}
-
-void calibrateAttitude() {
-  //DESCRIPTION: Used to warm up the main loop to allow the madwick filter to converge before commands can be sent to the actuators
-  //Assuming vehicle is powered up on level surface!
-  /*
-   * This function is used on startup to warm up the attitude estimation and is what causes startup to take a few seconds
-   * to boot. 
-   */
-  //Warm up IMU and madgwick filter in simulated main loop
-  for (int i = 0; i <= 10000; i++) {
-    prev_time = current_time;      
-    current_time = micros();      
-    dt = (current_time - prev_time)/1000000.0; 
-    imu.getIMUdata();
-    imu.Madgwick(dt);
-    loopRate(2000); //do not exceed 2000Hz
-  }
-}
-
-void getDesState() {
-  //DESCRIPTION: Normalizes desired control values to appropriate values
-  /*
-   * Updates the desired state variables thro_des, roll_des, pitch_des, and yaw_des. These are computed by using the raw
-   * RC pwm commands and scaling them to be within our limits defined in setup. thro_des stays within 0 to 1 range.
-   * roll_des and pitch_des are scaled to be within max roll/pitch amount in either degrees (angle mode) or degrees/sec
-   * (rate mode). yaw_des is scaled to be within max yaw in degrees/sec. Also creates roll_passthru, pitch_passthru, and
-   * yaw_passthru variables, to be used in commanding motors/servos with direct unstabilized commands in controlMixer().
-   */
-
-  // Note that additional controls, such as collective pitch, tilt servos, etc. can be added here.
-
-  thro_des = (channel_pwm[0] - 1000.0)/1000.0; //Between 0 and 1
-  roll_des = (channel_pwm[1] - 1500.0)/500.0; //Between -1 and 1
-  pitch_des = (channel_pwm[2] - 1500.0)/500.0; //Between -1 and 1
-  yaw_des = (channel_pwm[3] - 1500.0)/500.0; //Between -1 and 1
-  roll_passthru = roll_des/2.0; //Between -0.5 and 0.5
-  pitch_passthru = pitch_des/2.0; //Between -0.5 and 0.5
-  yaw_passthru = yaw_des/2.0; //Between -0.5 and 0.5
-  
-  //Constrain within normalized bounds
-  thro_des = constrain(thro_des, 0.0, 1.0); //Between 0 and 1
-  roll_des = constrain(roll_des, -1.0, 1.0)*maxRoll; //Between -maxRoll and +maxRoll
-  pitch_des = constrain(pitch_des, -1.0, 1.0)*maxPitch; //Between -maxPitch and +maxPitch
-  yaw_des = constrain(yaw_des, -1.0, 1.0)*maxYaw; //Between -maxYaw and +maxYaw
-  roll_passthru = constrain(roll_passthru, -0.5, 0.5);
-  pitch_passthru = constrain(pitch_passthru, -0.5, 0.5);
-  yaw_passthru = constrain(yaw_passthru, -0.5, 0.5);
-}
-
-
-void calibrateESCs() {
-  //DESCRIPTION: Used in void setup() to allow standard ESC calibration procedure with the radio to take place.
-  /*  
-   *  Simulates the void loop(), but only for the purpose of providing throttle pass through to the motors, so that you can
-   *  power up with throttle at full, let ESCs begin arming sequence, and lower throttle to zero. This function should only be
-   *  uncommented when performing an ESC calibration.
-   */
-   while (true) {
-      prev_time = current_time;      
-      current_time = micros();      
-      dt = (current_time - prev_time)/1000000.0;
-    
-      digitalWrite(13, HIGH); //LED on to indicate we are not in main loop
-
-      // getCommands(); //Pulls current available radio commands
-      radio.failSafe(); //Prevent failures in event of bad receiver connection, defaults to failsafe values assigned in setup
-      getDesState(); //Convert raw commands to normalized values based on saturated control limits
-      imu.getIMUdata(); //Pulls raw gyro, accelerometer, and magnetometer data from IMU and LP filters to remove noise
-      imu.Madgwick(dt); //Updates roll_IMU, pitch_IMU, and yaw_IMU (degrees)
-      getDesState(); //Convert raw commands to normalized values based on saturated control limits
-      
-      // m1_command_scaled = thro_des;
-      // m2_command_scaled = thro_des;
-      // m3_command_scaled = thro_des;
-      // m4_command_scaled = thro_des;
-      // m5_command_scaled = thro_des;
-      // m6_command_scaled = thro_des;
-      // s1_command_scaled = thro_des;
-      // s2_command_scaled = thro_des;
-      // s3_command_scaled = thro_des;
-      // s4_command_scaled = thro_des;
-      // s5_command_scaled = thro_des;
-      // s6_command_scaled = thro_des;
-      // s7_command_scaled = thro_des;
-      // scaleCommands(); //Scales motor commands to 125 to 250 range (oneshot125 protocol) and servo PWM commands to 0 to 180 (for servo library)
-    
-      //throttleCut(); //Directly sets motor commands to low based on state of ch5
-
-      Servos.commandAll(s_command_scaled);
-      Escs.commandAll(e_command_scaled);
-      Motors.commandMotors(m_command_scaled);
-      
-
-      // commandMotors(); //Sends command pulses to each motor pin using OneShot125 protocol
-      
-      // printRadioData(); //Radio pwm values (expected: 1000 to 2000)
-      
-      loopRate(2000); //Do not exceed 2000Hz, all filter parameters tuned to 2000Hz by default
-   }
-}
-
-
 
 
 
@@ -546,12 +447,122 @@ void switchRollYaw(int reverseRoll, int reverseYaw) {
   roll_des = reverseRoll*switch_holder;
 }
 
+
+
+
+
+//========================================================================================================================//
+//                                 ADDITIONAL STARTUP / SUPPORT FUNCTIONS                                                 //                           
+//========================================================================================================================//
+
+void getDesState() {
+  //DESCRIPTION: Normalizes desired control values to appropriate values
+  /*
+   * Updates the desired state variables thro_des, roll_des, pitch_des, and yaw_des. These are computed by using the raw
+   * RC pwm commands and scaling them to be within our limits defined in setup. thro_des stays within 0 to 1 range.
+   * roll_des and pitch_des are scaled to be within max roll/pitch amount in either degrees (angle mode) or degrees/sec
+   * (rate mode). yaw_des is scaled to be within max yaw in degrees/sec. Also creates roll_passthru, pitch_passthru, and
+   * yaw_passthru variables, to be used in commanding motors/servos with direct unstabilized commands in controlMixer().
+   */
+
+  // Note that additional controls, such as collective pitch, tilt servos, etc. can be added here.
+
+  thro_des = (channel_pwm[0] - 1000.0)/1000.0; //Between 0 and 1
+  roll_des = (channel_pwm[1] - 1500.0)/500.0; //Between -1 and 1
+  pitch_des = (channel_pwm[2] - 1500.0)/500.0; //Between -1 and 1
+  yaw_des = (channel_pwm[3] - 1500.0)/500.0; //Between -1 and 1
+  roll_passthru = roll_des/2.0; //Between -0.5 and 0.5
+  pitch_passthru = pitch_des/2.0; //Between -0.5 and 0.5
+  yaw_passthru = yaw_des/2.0; //Between -0.5 and 0.5
+  
+  //Constrain within normalized bounds
+  thro_des = constrain(thro_des, 0.0, 1.0); //Between 0 and 1
+  roll_des = constrain(roll_des, -1.0, 1.0)*maxRoll; //Between -maxRoll and +maxRoll
+  pitch_des = constrain(pitch_des, -1.0, 1.0)*maxPitch; //Between -maxPitch and +maxPitch
+  yaw_des = constrain(yaw_des, -1.0, 1.0)*maxYaw; //Between -maxYaw and +maxYaw
+  roll_passthru = constrain(roll_passthru, -0.5, 0.5);
+  pitch_passthru = constrain(pitch_passthru, -0.5, 0.5);
+  yaw_passthru = constrain(yaw_passthru, -0.5, 0.5);
+}
+
+void armedStatus() {
+  //DESCRIPTION: Check if the throttle cut is off and the throttle input is low to prepare for flight.
+  if ((channel_pwm[4] < 1500) && (channel_pwm[0] < 1050)) {
+    if (armedFly == false) {
+      Serial.println(F("ARMED!"));
+    }
+    armedFly = true;
+  }
+}
+
+void calibrateAttitude() {
+  //DESCRIPTION: Used to warm up the main loop to allow the madwick filter to converge before commands can be sent to the actuators
+  //Assuming vehicle is powered up on level surface!
+  /*
+   * This function is used on startup to warm up the attitude estimation and is what causes startup to take a few seconds
+   * to boot. 
+   */
+  //Warm up IMU and madgwick filter in simulated main loop
+  for (int i = 0; i <= 10000; i++) {
+    prev_time = current_time;      
+    current_time = micros();      
+    dt = (current_time - prev_time)/1000000.0; 
+    imu.getIMUdata();
+    imu.Madgwick(dt);
+    loopRate(2000); //do not exceed 2000Hz
+  }
+}
+
+void calibrateESCs() {
+  //DESCRIPTION: Used in void setup() to allow standard ESC calibration procedure with the radio to take place.
+  /*  
+   *  Simulates the void loop(), but only for the purpose of providing throttle pass through to the motors, so that you can
+   *  power up with throttle at full, let ESCs begin arming sequence, and lower throttle to zero. This function should only be
+   *  uncommented when performing an ESC calibration.
+   */
+   while (true) {
+      prev_time = current_time;      
+      current_time = micros();      
+      dt = (current_time - prev_time)/1000000.0;
+    
+      digitalWrite(13, HIGH); //LED on to indicate we are not in main loop
+
+      radio.getCommands(channel_pwm); //Pulls current available radio commands
+      radio.failSafe(); //Prevent failures in event of bad receiver connection, defaults to failsafe values assigned in setup
+      // getDesState(); //Convert raw commands to normalized values based on saturated control limits -- this was in here 2x.  Not sure that's needed
+      imu.getIMUdata(); //Pulls raw gyro, accelerometer, and magnetometer data from IMU and LP filters to remove noise
+      imu.Madgwick(dt); //Updates roll_IMU, pitch_IMU, and yaw_IMU (degrees)
+      getDesState(); //Convert raw commands to normalized values based on saturated control limits
+
+      // Set all outputs tied to the throttle input
+      for (int i=0; i<numMotors; i++) {
+        m_command_scaled[i] = thro_des;
+      }
+      for (int i=0; i<numServos; i++) {
+        s_command_scaled[i] = thro_des;
+      }
+      for (int i=0; i<numESCs; i++) {
+        e_command_scaled[i] = thro_des;
+      }
+    
+      //throttleCut(); //Directly sets motor commands to low based on state of ch5
+
+      Servos.commandAll(s_command_scaled);
+      Escs.commandAll(e_command_scaled);
+      Motors.commandAll(m_command_scaled);
+
+      // printRadioData(); //Radio pwm values (expected: 1000 to 2000)
+      
+      loopRate(2000); //Do not exceed 2000Hz, all filter parameters tuned to 2000Hz by default
+   }
+}
+
 void throttleCut() {
   //DESCRIPTION: Directly set actuator outputs to minimum value if triggered
   /*
       Monitors the state of radio command channel_5_pwm and directly sets the mx_command_PWM values to minimum (120 is
       minimum for oneshot125 protocol, 0 is minimum for standard PWM servo library used) if channel 5 is high. This is the last function
-      called before commandMotors() is called so that the last thing checked is if the user is giving permission to command
+      called before commandAll() is called so that the last thing checked is if the user is giving permission to command
       the motors to anything other than minimum value. Safety first.
 
       channel_5_pwm is LOW then throttle cut is OFF and throttle value can change. (ThrottleCut is DEACTIVATED)
@@ -565,15 +576,18 @@ void throttleCut() {
     for (int i=0; i<numMotors; i++) {
       m_command_scaled[i] = 0.0;
     }
-
     //Uncomment if using servo PWM variables to control motor ESCs
     for (int i=0; i<numESCs; i++) {
       e_command_scaled[i] = 0.0;
     }
-
-
   }
 }
+
+
+
+//========================================================================================================================//
+//                                             LOOP REGULATING FUNCTIONS                                                  //                           
+//========================================================================================================================//
 
 void loopRate(int freq) {
   //DESCRIPTION: Regulate main loop rate to specified frequency in Hz
