@@ -15,14 +15,10 @@ RadioComm::RadioComm(RadioType type, uint8_t num_channels) {
     // _sbus_data = nullptr;
     _dsm  = nullptr;
     _ppm  = nullptr;
-    _pwm  = nullptr;
 
     _type = type;
-
     _num_channels = num_channels;
 }
-
-
 
 
 
@@ -35,10 +31,6 @@ void RadioComm::begin() {
 
         _sbus = new SBUS(Serial5);
         _sbus->begin();
-
-
-
-
     }
     
     else if (_type == DSM) {
@@ -56,10 +48,10 @@ void RadioComm::begin() {
 void RadioComm::begin(int PPM_Pin) {
 
     if (_type == PPM) {
-        // _ppm = new PPM();
+        _ppm = new PPMReader(PPM_Pin, _num_channels);
         // _ppm->begin(PPM_Pin, false);
         // ppm.begin(PPM_Pin, false);
-        PPMReader _ppm(PPM_Pin, _num_channels);
+        // PPMReader _ppm(PPM_Pin, _num_channels);
 
 
     }
@@ -70,34 +62,12 @@ void RadioComm::begin(int PPM_Pin) {
     }
 }
 
-
-void RadioComm::begin(int channelPins[]) {
-    byte i;
-
-    // Assign channel pins into the Class variable.  _num_channels MUST be set at invocation time or the default of 6 will be used.
-    for (i=0; i<_num_channels; i++) {
-        _pwm_channel_pins[i] = channelPins[i];
-    }
-
-    if (_type == PWM) {
-        RC_Receiver _pwm(_pwm_channel_pins[0], _pwm_channel_pins[1], _pwm_channel_pins[2], _pwm_channel_pins[3], 
-            _pwm_channel_pins[4], _pwm_channel_pins[5], _pwm_channel_pins[6], _pwm_channel_pins[7]);
-
-        
-        
-    }
-
-    else {
-        Serial.println("No PWM type defined...");
-        while(1);
-    }
-}
     
 
 
 
 
-void RadioComm::getCommands(unsigned long int* returnArray) {
+void RadioComm::getCommands(unsigned int* returnArray) {
   //DESCRIPTION: Get raw PWM values for every channel from the radio
   /*
    * Updates radio PWM commands in loop based on current available commands. channel_x_pwm is the raw command used in the rest of 
@@ -109,7 +79,6 @@ void RadioComm::getCommands(unsigned long int* returnArray) {
    int8_t i;
     if (_type == sBUS) {
         // _sbus->Read();
-
         // /* Grab the received data */
         // _sbus_data = _sbus->data();
         // /* Display the received data */
@@ -125,43 +94,34 @@ void RadioComm::getCommands(unsigned long int* returnArray) {
                 channel_pwm[i] = _sbusChannels[i] * _sbus_scale + _sbus_bias;
             }
         }
+    }
 
+    else if (_type == PPM) {
+        for (i=0; i < _num_channels; i++) {
+            channel_pwm[i] = _ppm->latestValidChannelValue(i+1,1000);
+        }
+    }
 
+    else if (_type == DSM) {
+        if (_dsm->timedOut(micros())) {
+            //Serial.println("*** DSM RX TIMED OUT ***");
+        }
+        else if (_dsm->gotNewFrame()) {
+            // uint16_t values[_num_channels];
+            _dsm->getChannelValues(_sbusChannels, _num_channels);
 
-
-
-
+            for (i = 0; i < _num_channels; i++) {
+                channel_pwm[i] = _sbusChannels[i];
+            }
+        }
     }
 
 
 
-
-
-
-//   #if defined USE_PPM_RX || defined USE_PWM_RX
-//     channel_1_pwm = getRadioPWM(1);
-//     channel_2_pwm = getRadioPWM(2);
-//     channel_3_pwm = getRadioPWM(3);
-//     channel_4_pwm = getRadioPWM(4);
-//     channel_5_pwm = getRadioPWM(5);
-//     channel_6_pwm = getRadioPWM(6);
-    
-//   #elif defined USE_DSM_RX
-//     if (DSM.timedOut(micros())) {
-//         //Serial.println("*** DSM RX TIMED OUT ***");
-//     }
-//     else if (DSM.gotNewFrame()) {
-//         uint16_t values[num_DSM_channels];
-//         DSM.getChannelValues(values, num_DSM_channels);
-
-//         channel_1_pwm = values[0];
-//         channel_2_pwm = values[1];
-//         channel_3_pwm = values[2];
-//         channel_4_pwm = values[3];
-//         channel_5_pwm = values[4];
-//         channel_6_pwm = values[5];
-//     }
-//   #endif
+    else {
+        // Should probably have an error here
+    }
+        
 
     // Low-pass the critical commands and update previous values
     float b = 0.7; //Lower=slower, higher=noiser
@@ -175,7 +135,67 @@ void RadioComm::getCommands(unsigned long int* returnArray) {
     for (i = 0; i < _num_channels; i++) {
         returnArray[i] = channel_pwm[i];
     }
+}
 
+
+void RadioComm::setFailsafe(unsigned int* failsafeArray) {
+    for (int8_t i=0; i<_num_channels; i++) {
+        _channel_fs[i] = failsafeArray[i];
+    }
+}
+
+
+
+
+
+void RadioComm::failSafe() {
+    //DESCRIPTION: If radio gives garbage values, set all commands to default values
+    /*
+    * Radio connection failsafe used to check if the getCommands() function is returning acceptable pwm values. If any of 
+    * the commands are lower than 800 or higher than 2200, then we can be certain that there is an issue with the radio
+    * connection (most likely hardware related). If any of the channels show this failure, then all of the radio commands 
+    * channel_x_pwm are set to default failsafe values specified in the setup. Comment out this function when troubleshooting 
+    * your radio connection in case any extreme values are triggering this function to overwrite the printed variables.
+    * 
+    * When using SBUS, the library handles the detection of lost frames and failsafe.  Some receivers handle failsafe differently.
+    * Testing with FrSky SBUS receivers immediately triggered failsafe when Tx disconnected.  A Radiomaster RP3-H ELRS receiver would
+    * not trigger failsafe when set to "No Pulses", but would trigger when set to "Last Position" after a few seconds.
+    * Test your receiver's behavior! You can do this with the example sketch in the "Bolder Flight Systems SBUS" library.
+    */
+    int8_t i;
+
+    //If using SBUS, this will only check the boolean failsafe value from the SBUS library.  If using PWM RX, it checks each channel.
+    if (_type == sBUS) {
+        if (_sbusFailSafe) {
+            for (i=0; i<_num_channels; i++) {
+                channel_pwm[i] = _channel_fs[i];
+            }
+        }
+    }
+    
+    else {
+        unsigned minVal = 800;
+        unsigned maxVal = 2200;
+        int check[6] = {0};
+        int sum = 0;
+
+        //Triggers for failure criteria -- if the PWM value < minvalue or > maxvalue, set a flag
+        for (i=0; i<6; i++) {
+            if (channel_pwm[i] > maxVal || channel_pwm[i] < minVal) check[i] = 1;
+        }
+        
+        // Add up all the flags (if not failsafe, this will be 0)
+        for (i=0; i<6; i++) {
+            sum += check[i];
+        }
+
+        // If sum of all checks > 0, enable failsafe
+        if (sum > 0) {
+            for (i=0; i<_num_channels; i++) {
+                channel_pwm[i] = _channel_fs[i];
+            }
+        }
+    }
 }
 
 

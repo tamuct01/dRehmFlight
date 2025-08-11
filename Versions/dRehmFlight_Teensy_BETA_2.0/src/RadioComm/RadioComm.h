@@ -14,11 +14,11 @@
 // #include "sbus.h" // Bolder Flight Systems SBUS library
 #include <PPMReader.h>
 #include "../DSMRX/DSMRX.h"
-#include "RC_Receiver.h"
+
+
 
 
 enum RadioType {
-    PWM,
     PPM,
     DSM,
     sBUS
@@ -31,22 +31,15 @@ public:
     RadioComm(RadioType type);
     RadioComm(RadioType type, uint8_t num_channels);
 
-
-
-
     void begin();      //DSM & //SBUS
     void begin(int PPM_Pin); //PPM
-    void begin(int channelPins[]);   //PWM
 
-    void getCommands(unsigned long int* returnArray);
+    void getCommands(unsigned int* returnArray);
+    void setFailsafe(unsigned int* failsafeArray);
+    void failSafe();
 
-    
 
     unsigned long channel_pwm[16] = {0}; 
-
-
-
-
 
 
 private:
@@ -57,14 +50,11 @@ private:
     SBUS* _sbus;
     DSMRX* _dsm;
     PPMReader* _ppm;
-    RC_Receiver* _pwm;
 
     uint8_t   _num_channels = 6;    
     uint16_t _sbusChannels[16] = {0};
-    int _pwm_channel_pins[8] = {0};
-    unsigned long _channel_pwm_prev[4] = {0};
-
-
+    unsigned int _channel_pwm_prev[4] = {0};
+    unsigned int _channel_fs[16] = {0};
 
     bool _sbusFailSafe;
     bool _sbusLostFrame;
@@ -72,10 +62,6 @@ private:
     //sBus scaling below is for Taranis-Plus and X4R-SB
     const float _sbus_scale = 0.615;  
     const float _sbus_bias  = 895.0; 
-
-
-
-
 };
 
 
